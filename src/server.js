@@ -12,8 +12,12 @@ require("./models/SellRequest");
 
 const app = express();
 
+// Updated CORS configuration to allow both local development and Netlify
 app.use(cors({
-    origin: "http://localhost:5173",
+    origin: [
+        "http://localhost:5173",
+        "https://jcs-g.netlify.app"
+    ],
     credentials: true,
 }));
 
