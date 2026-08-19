@@ -12,11 +12,11 @@ require("./models/SellRequest");
 
 const app = express();
 
-// Updated CORS configuration to allow both local development and Netlify
+// Updated CORS configuration to allow local development and Cloudflare Workers
 app.use(cors({
     origin: [
         "http://localhost:5173",
-        "https://jcs-g.netlify.app"
+        "https://jcs-global.thotarushitha22.workers.dev"
     ],
     credentials: true,
 }));
