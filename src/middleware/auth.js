@@ -27,13 +27,12 @@ const adminOnly = (req, res, next) => {
 
 const sellerOnly = (req, res, next) => {
     const role = String(req.user?.role || "").toLowerCase();
-    if (role !== "seller" && role !== "merchant" && role !== "admin") {
+    if (role !== "seller" && role !== "merchant") {
         return res.status(403).json({ message: "Sellers only" });
     }
     next();
 };
 
-// Combined middleware allowing both admins and merchants/sellers
 const sellerOrAdmin = (req, res, next) => {
     const role = String(req.user?.role || "").toLowerCase();
     if (!["seller", "merchant", "admin"].includes(role)) {

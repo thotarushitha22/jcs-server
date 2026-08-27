@@ -1,13 +1,9 @@
-const router = require("express").Router();
-const { protect, sellerOnly } = require("../middleware/auth");
-const {
-    getMerchantDashboard,
-    getMerchantAnalytics,
-    updateMerchantSettings,
-} = require("../controllers/merchantController"); // Adjust relative path if needed
+const express = require("express");
+const router = express.Router();
 
-router.get("/dashboard", protect, sellerOnly, getMerchantDashboard);
-router.get("/analytics", protect, sellerOnly, getMerchantAnalytics);
-router.put("/settings", protect, sellerOnly, updateMerchantSettings);
+// Add merchant endpoints here as needed
+router.get("/dashboard", (req, res) => {
+    res.json({ message: "Merchant route active" });
+});
 
 module.exports = router;

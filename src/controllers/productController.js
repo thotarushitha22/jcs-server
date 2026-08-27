@@ -1,7 +1,5 @@
-const pool = require("../config/db"); // Your Neon PostgreSQL connection pool
+const pool = require("../config/db");
 
-// @desc    Get all products
-// @route   GET /api/products
 const getProducts = async (req, res) => {
     try {
         const { rows } = await pool.query("SELECT * FROM products ORDER BY created_at DESC");
@@ -11,8 +9,6 @@ const getProducts = async (req, res) => {
     }
 };
 
-// @desc    Get merchant's own products
-// @route   GET /api/products/mine
 const getMyProducts = async (req, res) => {
     try {
         const userId = req.user.id || req.user.userId || req.user._id;
@@ -23,8 +19,6 @@ const getMyProducts = async (req, res) => {
     }
 };
 
-// @desc    Get single product by ID
-// @route   GET /api/products/:id
 const getProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -38,8 +32,6 @@ const getProductById = async (req, res) => {
     }
 };
 
-// @desc    Create new product
-// @route   POST /api/products
 const createProduct = async (req, res) => {
     try {
         const { title, brand, price, mrp, stock, moq, categoryId, sku, model, gstPercent, overview, warranty, images } = req.body;
@@ -65,8 +57,6 @@ const createProduct = async (req, res) => {
     }
 };
 
-// @desc    Update product
-// @route   PUT /api/products/:id
 const updateProduct = async (req, res) => {
     try {
         const { id } = req.params;
@@ -87,8 +77,6 @@ const updateProduct = async (req, res) => {
     }
 };
 
-// @desc    Delete product
-// @route   DELETE /api/products/:id
 const deleteProduct = async (req, res) => {
     try {
         const { id } = req.params;
@@ -104,7 +92,6 @@ const deleteProduct = async (req, res) => {
     }
 };
 
-// Export ALL functions referenced in productRoutes
 module.exports = {
     getProducts,
     getMyProducts,
