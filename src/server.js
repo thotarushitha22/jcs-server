@@ -12,15 +12,7 @@ require("./models/SellRequest");
 
 const app = express();
 
-// Updated CORS configuration to allow local development and Cloudflare Workers
-app.use(cors({
-    origin: [
-        "http://localhost:5173",
-        "https://jcs-global.thotarushitha22.workers.dev"
-    ],
-    credentials: true,
-}));
-
+app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -33,6 +25,7 @@ app.use("/api/categories", require("./routes/categoryRoutes"));
 app.use("/api/products", require("./routes/productRoutes"));
 app.use("/api/orders", require("./routes/orderRoutes"));
 app.use("/api/sell-requests", require("./routes/sellRequestRoutes"));
+app.use("/api/upload", require("./routes/uploadRoutes"));
 
 const start = async () => {
     await connectDB();

@@ -33,15 +33,24 @@ exports.getProducts = async (req, res) => {
             offset: Number(offset),
         });
 
-        res.json({
-            products: rows,
-            total: count,
-            page: Number(page),
-            pages: Math.ceil(count / limit),
-        });
+        res.json({ products: rows, total: count, page: Number(page), pages: Math.ceil(count / limit) });
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: "Failed to fetch products", error: err.message });
+    }
+};
+
+// GET /api/products/mine  (protected — seller/admin sees their own listings)
+exports.getMyProducts = async (req, res) => {
+    try {
+        const products = await Product.findAll({
+            where: { createdBy: req.user.id },
+            include: [{ model: Category, as: "category", attributes: ["id", "name", "slug"] }],
+            order: [["createdAt", "DESC"]],
+        });
+        res.json(products);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to fetch your listings", error: err.message });
     }
 };
 
@@ -63,7 +72,6 @@ exports.getRelatedProducts = async (req, res) => {
     try {
         const product = await Product.findByPk(req.params.id);
         if (!product) return res.status(404).json({ message: "Product not found" });
-
         const related = await Product.findAll({
             where: { categoryId: product.categoryId, id: { [Op.ne]: product.id } },
             limit: 3,
@@ -74,7 +82,7 @@ exports.getRelatedProducts = async (req, res) => {
     }
 };
 
-// POST /api/products  (admin only — see routes)
+// POST /api/products  (any logged-in seller or admin — sellers own what they create)
 exports.createProduct = async (req, res) => {
     try {
         const product = await Product.create({ ...req.body, createdBy: req.user.id });
@@ -84,11 +92,16 @@ exports.createProduct = async (req, res) => {
     }
 };
 
-// PUT /api/products/:id  (admin only)
+// PUT /api/products/:id  (admin, or the seller who created it)
 exports.updateProduct = async (req, res) => {
     try {
         const product = await Product.findByPk(req.params.id);
         if (!product) return res.status(404).json({ message: "Product not found" });
+
+        if (req.user.role !== "admin" && product.createdBy !== req.user.id) {
+            return res.status(403).json({ message: "You can only edit your own listings" });
+        }
+
         await product.update(req.body);
         res.json(product);
     } catch (err) {
@@ -96,11 +109,16 @@ exports.updateProduct = async (req, res) => {
     }
 };
 
-// DELETE /api/products/:id  (admin only)
+// DELETE /api/products/:id  (admin, or the seller who created it)
 exports.deleteProduct = async (req, res) => {
     try {
         const product = await Product.findByPk(req.params.id);
         if (!product) return res.status(404).json({ message: "Product not found" });
+
+        if (req.user.role !== "admin" && product.createdBy !== req.user.id) {
+            return res.status(403).json({ message: "You can only delete your own listings" });
+        }
+
         await product.destroy();
         res.json({ message: "Product deleted" });
     } catch (err) {
