@@ -1,15 +1,35 @@
 const router = require("express").Router();
 const multer = require("multer");
-const { uploadImage } = require("../controllers/uploadController");
+const path = require("path");
 const { protect } = require("../middleware/auth");
 
-// Memory storage — the file buffer is passed straight to Cloudinary,
-// never written to disk (Render's filesystem isn't persistent anyway).
-const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max per image
+// Storage Configuration
+const storage = multer.diskStorage({
+    destination(req, file, cb) {
+        cb(null, "uploads/");
+    },
+    filename(req, file, cb) {
+        cb(
+            null,
+            `${file.fieldname}-${Date.now()}${path.extname(file.originalname)}`
+        );
+    },
 });
 
-router.post("/", protect, upload.single("image"), uploadImage);
+const upload = multer({
+    storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
+});
+
+// Single file upload route
+router.post("/", protect, upload.single("image"), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ message: "No image file provided" });
+    }
+    res.json({
+        message: "Image uploaded successfully",
+        url: `/${req.file.path.replace(/\\/g, "/")}`,
+    });
+});
 
 module.exports = router;

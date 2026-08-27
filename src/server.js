@@ -1,39 +1,34 @@
-require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const cookieParser = require("cookie-parser");
-const { connectDB, sequelize } = require("./config/db");
+const dotenv = require("dotenv");
 
-require("./models/User");
-require("./models/Category");
-require("./models/Product");
-require("./models/Order");
-require("./models/SellRequest");
+dotenv.config();
 
 const app = express();
 
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+// Middleware
+app.use(cors());
 app.use(express.json());
-app.use(cookieParser());
 
-app.get("/", (req, res) => {
-    res.json({ message: "JCSGlobal API is running." });
+// Import Routes
+const authRoutes = require("./routes/authRoutes");
+const categoryRoutes = require("./routes/categoryRoutes");
+const merchantRoutes = require("./routes/merchantRoutes");
+const orderRoutes = require("./routes/orderRoutes");
+const productRoutes = require("./routes/productRoutes");
+const sellRequestRoutes = require("./routes/sellRequestRoutes");
+const uploadRoutes = require("./routes/uploadRoutes");
+
+// Register Routes (Line 25 area)
+app.use("/api/auth", authRoutes);
+app.use("/api/categories", categoryRoutes);
+app.use("/api/merchant", merchantRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/sell-requests", sellRequestRoutes);
+app.use("/api/upload", uploadRoutes);
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
-
-app.use("/api/auth", require("./routes/authRoutes"));
-app.use("/api/categories", require("./routes/categoryRoutes"));
-app.use("/api/products", require("./routes/productRoutes"));
-app.use("/api/orders", require("./routes/orderRoutes"));
-app.use("/api/sell-requests", require("./routes/sellRequestRoutes"));
-app.use("/api/upload", require("./routes/uploadRoutes"));
-
-const start = async () => {
-    await connectDB();
-    await sequelize.sync({ alter: true });
-    console.log("Database synced — all tables are ready.");
-
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-};
-
-start();

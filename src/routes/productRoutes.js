@@ -1,25 +1,12 @@
 const router = require("express").Router();
-const {
-    getProducts,
-    getMyProducts,
-    getProduct,
-    getRelatedProducts,
-    createProduct,
-    updateProduct,
-    deleteProduct,
-} = require("../controllers/productController");
-const { protect } = require("../middleware/auth");
+// 1. Import sellerOrAdmin instead of adminOnly
+const { protect, sellerOrAdmin } = require("../middleware/auth");
+const { createProduct, getProducts, getProductById } = require("../controllers/productController");
 
-// Public reads
 router.get("/", getProducts);
-router.get("/mine", protect, getMyProducts); // must come before /:id so "mine" isn't treated as an id
-router.get("/:id", getProduct);
-router.get("/:id/related", getRelatedProducts);
+router.get("/:id", getProductById);
 
-// Any logged-in seller or admin can create/manage listings —
-// ownership checks happen inside the controller (sellers can only touch their own).
-router.post("/", protect, createProduct);
-router.put("/:id", protect, updateProduct);
-router.delete("/:id", protect, deleteProduct);
+// 2. Change adminOnly to sellerOrAdmin here:
+router.post("/", protect, sellerOrAdmin, createProduct);
 
 module.exports = router;

@@ -1,15 +1,18 @@
 const router = require("express").Router();
+const { protect, adminOnly } = require("../middleware/auth");
 const {
     createSellRequest,
-    getMySellRequests,
-    getAllSellRequests,
+    getSellRequests,
+    getSellRequestById,
     updateSellRequestStatus,
 } = require("../controllers/sellRequestController");
-const { protect, adminOnly } = require("../middleware/auth");
 
+// Public/User endpoint
 router.post("/", protect, createSellRequest);
-router.get("/", protect, getMySellRequests);
-router.get("/all", protect, adminOnly, getAllSellRequests);
+
+// Admin-only endpoints
+router.get("/", protect, adminOnly, getSellRequests);
+router.get("/:id", protect, adminOnly, getSellRequestById);
 router.put("/:id/status", protect, adminOnly, updateSellRequestStatus);
 
 module.exports = router;

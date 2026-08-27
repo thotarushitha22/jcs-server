@@ -14,7 +14,7 @@ const protect = (req, res, next) => {
         req.user = decoded;
         next();
     } catch (err) {
-        res.status(401).json({ message: "Not authorized — invalid or expired token" });
+        return res.status(401).json({ message: "Not authorized — invalid or expired token" });
     }
 };
 
@@ -26,10 +26,20 @@ const adminOnly = (req, res, next) => {
 };
 
 const sellerOnly = (req, res, next) => {
-    if (req.user?.role !== "seller") {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (role !== "seller" && role !== "merchant" && role !== "admin") {
         return res.status(403).json({ message: "Sellers only" });
     }
     next();
 };
 
-module.exports = { protect, adminOnly, sellerOnly };
+// Combined middleware allowing both admins and merchants/sellers
+const sellerOrAdmin = (req, res, next) => {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (!["seller", "merchant", "admin"].includes(role)) {
+        return res.status(403).json({ message: "Sellers and Admins only" });
+    }
+    next();
+};
+
+module.exports = { protect, adminOnly, sellerOnly, sellerOrAdmin };
