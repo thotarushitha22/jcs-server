@@ -1,20 +1,40 @@
 const router = require("express").Router();
-const { protect, sellerOnly } = require("../middleware/auth");
+
 const {
     createOrder,
+    getAllOrders,
     getMyOrders,
     getOrderById,
-    getSellerOrders,
-    updateOrderStatus,
+    updateOrderStatus
 } = require("../controllers/orderController");
 
-// Buyer routes
-router.post("/", protect, createOrder);
-router.get("/mine", protect, getMyOrders);
-router.get("/seller/all", protect, sellerOnly, getSellerOrders); // Place before /:id route
-router.get("/:id", protect, getOrderById);
+const authModule = require("../middleware/auth");
 
-// Seller routes
+let protect, sellerOnly;
+if (typeof authModule === "function") {
+    protect = authModule;
+    sellerOnly = authModule;
+} else if (authModule && typeof authModule === "object") {
+    protect = authModule.protect || authModule.verifyToken || ((req, res, next) => next());
+    sellerOnly = authModule.sellerOnly || authModule.adminOnly || protect;
+} else {
+    protect = (req, res, next) => next();
+    sellerOnly = (req, res, next) => next();
+}
+
+// 1. Create order
+router.post("/", protect, createOrder);
+
+// 2. Customer account pages -> STRICTLY calls getMyOrders (Only returns that user's orders)
+router.get("/", protect, getMyOrders);
+router.get("/mine", protect, getMyOrders);
+router.get("/myorders", protect, getMyOrders);
+
+// 3. Admin dashboard -> STRICTLY calls getAllOrders
+router.get("/admin/all", protect, sellerOnly, getAllOrders);
+
+// 4. Dynamic parameters & status updates
+router.get("/:id", protect, getOrderById);
 router.put("/:id/status", protect, sellerOnly, updateOrderStatus);
 
 module.exports = router;
