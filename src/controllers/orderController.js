@@ -46,24 +46,38 @@ const createOrder = async (req, res) => {
 };
 
 // ==========================================
-// CUSTOMER: GET MY ORDERS (Isolated)
+// CUSTOMER & MERCHANT: GET ORDERS (Role-Aware)
 // ==========================================
 const getMyOrders = async (req, res) => {
     try {
         const userId = req.user?.id || req.user?.userId || req.user?._id;
+        const userRole = req.user?.role;
 
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized: Missing user identification" });
         }
 
-        const result = await pool.query(
-            'SELECT * FROM orders WHERE "buyerId" = $1 ORDER BY id DESC',
-            [userId]
-        );
+        let result;
+
+        // If the user is a merchant, seller, or admin, return store orders with buyer metadata
+        if (userRole === "merchant" || userRole === "seller" || userRole === "admin") {
+            result = await pool.query(`
+                SELECT o.*, u.name as buyer_name, u.email as buyer_email 
+                FROM orders o 
+                LEFT JOIN users u ON o."buyerId" = u.id 
+                ORDER BY o.id DESC
+            `);
+        } else {
+            // Regular customer: only see their own purchases
+            result = await pool.query(
+                'SELECT * FROM orders WHERE "buyerId" = $1 ORDER BY id DESC',
+                [userId]
+            );
+        }
 
         return res.status(200).json(result.rows || []);
     } catch (error) {
-        console.error("Error fetching customer orders:", error.message);
+        console.error("Error fetching orders:", error.message);
         return res.status(500).json({ message: "Server error fetching your orders" });
     }
 };
