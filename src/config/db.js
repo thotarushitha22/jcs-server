@@ -27,16 +27,12 @@ const pool = new Pool({
 const initializeDatabase = async () => {
     try {
         await pool.query(`
-            ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(50) USING role::text;
-            ALTER TABLE users ALTER COLUMN role SET DEFAULT 'buyer';
+            ALTER TABLE IF EXISTS users ALTER COLUMN role TYPE VARCHAR(50) USING role::text;
+            ALTER TABLE IF EXISTS users ALTER COLUMN role SET DEFAULT 'buyer';
 
-            ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(255);
-            ALTER TABLE products ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-            ALTER TABLE products ALTER COLUMN "createdAt" DROP NOT NULL;
-            ALTER TABLE products ALTER COLUMN "createdAt" SET DEFAULT CURRENT_TIMESTAMP;
-            ALTER TABLE products ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-            ALTER TABLE products ALTER COLUMN "updatedAt" DROP NOT NULL;
-            ALTER TABLE products ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP;
+            ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS category VARCHAR(255);
+            ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+            ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -49,26 +45,28 @@ const initializeDatabase = async () => {
                 "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE TABLE IF NOT EXISTS "Orders" (
+            -- Changed from "Orders" (capitalized/quoted) to lowercase orders to match queries
+            CREATE TABLE IF NOT EXISTS orders (
                 id SERIAL PRIMARY KEY,
-                "userId" INTEGER NOT NULL,
-                "shippingName" VARCHAR(255) NOT NULL,
+                order_id VARCHAR(50) UNIQUE,
+                "buyerId" INTEGER,
+                "shippingName" VARCHAR(255),
                 "shippingGstin" VARCHAR(255),
-                "shippingAddress" TEXT NOT NULL,
-                "shippingCity" VARCHAR(255) NOT NULL,
-                "shippingPincode" VARCHAR(50) NOT NULL,
-                "shippingPhone" VARCHAR(50) NOT NULL,
-                "paymentMethod" VARCHAR(50) NOT NULL DEFAULT 'COD',
-                "itemsPrice" DECIMAL(10, 2) NOT NULL DEFAULT 0,
-                "taxPrice" DECIMAL(10, 2) NOT NULL DEFAULT 0,
-                "shippingPrice" DECIMAL(10, 2) NOT NULL DEFAULT 0,
-                "totalPrice" DECIMAL(10, 2) NOT NULL DEFAULT 0,
+                "shippingAddress" TEXT,
+                "shippingCity" VARCHAR(255),
+                "shippingPincode" VARCHAR(50),
+                "shippingPhone" VARCHAR(50),
+                "paymentMethod" VARCHAR(50) DEFAULT 'COD',
+                "itemsPrice" DECIMAL(10, 2) DEFAULT 0,
+                "taxPrice" DECIMAL(10, 2) DEFAULT 0,
+                "shippingPrice" DECIMAL(10, 2) DEFAULT 0,
+                "totalPrice" DECIMAL(10, 2) DEFAULT 0,
                 status VARCHAR(50) NOT NULL DEFAULT 'Pending',
                 "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE TABLE IF NOT EXISTS "OrderItems" (
+            CREATE TABLE IF NOT EXISTS order_items (
                 id SERIAL PRIMARY KEY,
                 "orderId" INTEGER NOT NULL,
                 "productId" INTEGER NOT NULL,
