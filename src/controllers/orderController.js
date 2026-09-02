@@ -20,7 +20,6 @@ async function resolveOrderRow(orderIdentifier) {
     if (!orderIdentifier) return null;
 
     try {
-        // 1. Exact match on order_id, orderId, or numeric id
         const stringMatch = await pool.query(
             'SELECT * FROM orders WHERE order_id = $1 OR "orderId" = $1 OR CAST(id AS TEXT) = $1',
             [String(orderIdentifier)]
@@ -30,7 +29,6 @@ async function resolveOrderRow(orderIdentifier) {
         }
     } catch (e) {}
 
-    // 2. Extract digits and try matching database primary key `id`
     try {
         const numericStr = String(orderIdentifier).replace(/\D/g, "");
         if (numericStr) {
@@ -42,7 +40,6 @@ async function resolveOrderRow(orderIdentifier) {
         }
     } catch (e) {}
 
-    // 3. Partial / ILIKE match
     try {
         const likeMatch = await pool.query(
             'SELECT * FROM orders WHERE order_id ILIKE $1 OR "orderId" ILIKE $1 ORDER BY id DESC LIMIT 1',
@@ -53,7 +50,6 @@ async function resolveOrderRow(orderIdentifier) {
         }
     } catch (e) {}
 
-    // 4. Absolute fallback: return the most recent order so it never 404s unnecessarily
     try {
         const latest = await pool.query('SELECT * FROM orders ORDER BY id DESC LIMIT 1');
         if (latest.rows.length > 0) {
@@ -65,7 +61,7 @@ async function resolveOrderRow(orderIdentifier) {
 }
 
 // ==========================================
-// HELPER: Format Order Rows Consistently
+// HELPER: Format & Normalize Order Rows
 // ==========================================
 const formatOrder = (order) => {
     let parsedItems = order.items;
@@ -76,11 +72,29 @@ const formatOrder = (order) => {
             parsedItems = [];
         }
     }
+
+    // Normalize status to clean Title Case (e.g., "Delivered", "Shipped", "Pending")
+    let rawStatus = (order.status || "Pending").trim().toLowerCase();
+    let normalizedStatus = "Pending";
+    if (rawStatus === "delivered" || rawStatus === "complete" || rawStatus === "completed") {
+        normalizedStatus = "Delivered";
+    } else if (rawStatus === "shipped" || rawStatus === "dispatched") {
+        normalizedStatus = "Shipped";
+    } else if (rawStatus === "processing" || rawStatus === "packed") {
+        normalizedStatus = "Processing";
+    } else {
+        // Capitalize first letter as fallback
+        normalizedStatus = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+    }
+
     return {
         ...order,
         orderId: order.order_id || order.orderId || `JCS-${order.id}`,
         items: parsedItems || [],
-        shipping_email: order.shipping_email || order.buyer_email || order.email || "N/A"
+        shipping_email: order.shipping_email || order.buyer_email || order.email || "N/A",
+        status: normalizedStatus,
+        // Keep raw uppercase status available if admin UI explicitly checks strict uppercase
+        rawStatus: order.status
     };
 };
 
