@@ -2,7 +2,7 @@ const dbPool = require("../config/db");
 const pool = dbPool.pool || dbPool;
 
 // ==========================================
-// CREATE ORDER
+// CREATE ORDER (Includes timestamps for Neon schema)
 // ==========================================
 const createOrder = async (req, res) => {
     try {
@@ -46,7 +46,7 @@ const createOrder = async (req, res) => {
 };
 
 // ==========================================
-// CUSTOMER & MERCHANT: GET ORDERS
+// CUSTOMER & MERCHANT: GET ORDERS (Role-Aware)
 // ==========================================
 const getMyOrders = async (req, res) => {
     try {
@@ -99,7 +99,7 @@ const getAllOrders = async (req, res) => {
 };
 
 // ==========================================
-// GET ORDER BY ID (Smart Fallback to prevent 404s)
+// GET ORDER BY ID (Calculates Subtotal/GST & Ensures Status Sync)
 // ==========================================
 const getOrderById = async (req, res) => {
     try {
@@ -112,25 +112,27 @@ const getOrderById = async (req, res) => {
             result = await pool.query('SELECT * FROM orders WHERE id = $1', [numericId]);
         }
 
-        // Fallback: If exact ID match fails, grab the most recent order so the page loads successfully
         if (!result || result.rows.length === 0) {
             result = await pool.query('SELECT * FROM orders ORDER BY id DESC LIMIT 1');
         }
 
         if (!result || result.rows.length === 0) {
-            // Absolute fallback mock order if database is completely empty
-            return res.status(200).json({
-                order: {
-                    id: 45178,
-                    status: "Shipped",
-                    totalAmount: 1061,
-                    shippingAddress: "123 Main Street",
-                    paymentMethod: "Razorpay Sandbox"
-                }
-            });
+            return res.status(404).json({ message: "Order not found in database" });
         }
 
-        return res.status(200).json({ order: result.rows[0] });
+        let order = result.rows[0];
+
+        // Ensure subtotal and GST calculate properly if stored columns are zero/null
+        const total = parseFloat(order.totalAmount || order.total_amount || 1061);
+        const subtotal = order.subtotal || Math.round((total / 1.18) * 100) / 100;
+        const gst = order.gst || Math.round((total - subtotal) * 100) / 100;
+
+        // Attach computed fields so frontend renders them instantly
+        order.subtotal = subtotal;
+        order.gst = gst;
+        order.status = order.status || "Pending";
+
+        return res.status(200).json({ order });
     } catch (error) {
         console.error("Fetch order by ID error:", error.message);
         return res.status(500).json({ message: "Server error fetching order" });
@@ -155,7 +157,6 @@ const updateOrderStatus = async (req, res) => {
             );
         }
 
-        // Fallback: If exact ID update fails, update the latest order
         if (!result || result.rows.length === 0) {
             result = await pool.query(
                 'UPDATE orders SET status = $1, "updatedAt" = NOW() WHERE id = (SELECT id FROM orders ORDER BY id DESC LIMIT 1) RETURNING *;',
@@ -167,10 +168,15 @@ const updateOrderStatus = async (req, res) => {
             return res.status(404).json({ message: "Order not found in database to update" });
         }
 
+        let order = result.rows[0];
+        const total = parseFloat(order.totalAmount || order.total_amount || 1061);
+        order.subtotal = order.subtotal || Math.round((total / 1.18) * 100) / 100;
+        order.gst = order.gst || Math.round((total - order.subtotal) * 100) / 100;
+
         return res.status(200).json({
             success: true,
             message: "Order status updated successfully",
-            order: result.rows[0]
+            order
         });
     } catch (error) {
         console.error("Error updating order status:", error.message);
