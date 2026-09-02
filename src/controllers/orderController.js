@@ -8,6 +8,8 @@ const pool = dbPool.pool || dbPool;
     try {
         await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_id TEXT;');
         await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS items JSONB;');
+        await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_email TEXT;');
+        await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method_title TEXT;');
     } catch (err) {}
 })();
 
@@ -62,6 +64,26 @@ async function resolveOrderRow(orderIdentifier) {
     return null;
 }
 
+// ==========================================
+// HELPER: Format Order Rows Consistently
+// ==========================================
+const formatOrder = (order) => {
+    let parsedItems = order.items;
+    if (typeof parsedItems === 'string') {
+        try {
+            parsedItems = JSON.parse(parsedItems);
+        } catch (err) {
+            parsedItems = [];
+        }
+    }
+    return {
+        ...order,
+        orderId: order.order_id || order.orderId || `JCS-${order.id}`,
+        items: parsedItems || [],
+        shipping_email: order.shipping_email || order.buyer_email || order.email || "N/A"
+    };
+};
+
 const createOrder = async (req, res) => {
     try {
         const userId = req.user?.id || req.user?.userId;
@@ -71,6 +93,7 @@ const createOrder = async (req, res) => {
             totalAmount,
             shippingAddress,
             shippingName,
+            shippingEmail,
             shippingPhone,
             shippingCity,
             shippingPincode,
@@ -84,15 +107,15 @@ const createOrder = async (req, res) => {
         }
 
         const generatedOrderId = orderId || `JCS-${Math.floor(10000 + Math.random() * 90000)}`;
-        const parsedItems = typeof items === 'string' ? items : JSON.stringify(items || [{ title: "Product Item", quantity: 1, price: totalAmount || 1061 }]);
+        const parsedItems = JSON.stringify(items || [{ title: "Product Item", quantity: 1, price: totalAmount || 1061 }]);
 
         const result = await pool.query(
             `INSERT INTO orders (
                 order_id, "buyerId", items, "totalAmount", "shippingAddress", 
-                "shippingName", "shippingPhone", "shippingCity", "shippingPincode", 
+                "shippingName", shipping_email, "shippingPhone", "shippingCity", "shippingPincode", 
                 "shippingGstin", "paymentMethod", payment_method_title, status, "createdAt", "updatedAt"
             ) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()) RETURNING *;`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW()) RETURNING *;`,
             [
                 generatedOrderId,
                 userId,
@@ -100,6 +123,7 @@ const createOrder = async (req, res) => {
                 totalAmount || 1061,
                 shippingAddress || "123 Main Street",
                 shippingName || "",
+                shippingEmail || "",
                 shippingPhone || "",
                 shippingCity || "",
                 shippingPincode || "",
@@ -110,8 +134,7 @@ const createOrder = async (req, res) => {
             ]
         );
 
-        let createdOrder = result.rows[0];
-        createdOrder.orderId = createdOrder.order_id || generatedOrderId;
+        const createdOrder = formatOrder(result.rows[0]);
 
         return res.status(201).json({
             success: true,
@@ -142,16 +165,16 @@ const getMyOrders = async (req, res) => {
                 ORDER BY o.id DESC
             `);
         } else {
-            result = await pool.query(
-                'SELECT * FROM orders WHERE "buyerId" = $1 ORDER BY id DESC',
-                [userId]
-            );
+            result = await pool.query(`
+                SELECT o.*, u.name as buyer_name, u.email as buyer_email 
+                FROM orders o 
+                LEFT JOIN users u ON o."buyerId" = u.id 
+                WHERE o."buyerId" = $1 
+                ORDER BY o.id DESC
+            `, [userId]);
         }
 
-        const formattedRows = (result.rows || []).map(order => ({
-            ...order,
-            orderId: order.order_id || order.orderId || `JCS-${order.id}`
-        }));
+        const formattedRows = (result.rows || []).map(formatOrder);
 
         return res.status(200).json({ success: true, orders: formattedRows });
     } catch (error) {
@@ -169,12 +192,8 @@ const getAllOrders = async (req, res) => {
             ORDER BY o.id DESC
         `);
 
-        const formattedRows = (result.rows || []).map(order => ({
-            ...order,
-            orderId: order.order_id || order.orderId || `JCS-${order.id}`
-        }));
+        const formattedRows = (result.rows || []).map(formatOrder);
 
-        // Supporting both array return or object wrap depending on frontend expectations
         return res.status(200).json({ success: true, orders: formattedRows });
     } catch (error) {
         console.error("Error fetching admin orders:", error.message);
@@ -185,14 +204,23 @@ const getAllOrders = async (req, res) => {
 const getOrderById = async (req, res) => {
     try {
         const orderIdentifier = req.params.id;
-        const order = await resolveOrderRow(orderIdentifier);
+        const orderRow = await resolveOrderRow(orderIdentifier);
 
-        if (!order) {
+        if (!orderRow) {
             return res.status(404).json({ message: "Order not found in database" });
         }
 
-        order.orderId = order.order_id || order.orderId || orderIdentifier;
-        return res.status(200).json({ success: true, order });
+        let order = orderRow;
+        if (orderRow.buyerId) {
+            const userQuery = await pool.query('SELECT name, email FROM users WHERE id = $1', [orderRow.buyerId]);
+            if (userQuery.rows.length > 0) {
+                order.buyer_name = userQuery.rows[0].name;
+                order.buyer_email = userQuery.rows[0].email;
+            }
+        }
+
+        const formattedOrder = formatOrder(order);
+        return res.status(200).json({ success: true, order: formattedOrder });
     } catch (error) {
         console.error("Fetch order by ID error:", error.message);
         return res.status(500).json({ message: "Server error fetching order" });
@@ -214,8 +242,7 @@ const updateOrderStatus = async (req, res) => {
             [status, targetOrder.id]
         );
 
-        let order = updateResult.rows[0];
-        order.orderId = order.order_id || order.orderId || orderIdentifier;
+        const order = formatOrder(updateResult.rows[0]);
 
         return res.status(200).json({
             success: true,
