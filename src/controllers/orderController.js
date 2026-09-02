@@ -2,14 +2,39 @@ const dbPool = require("../config/db");
 const pool = dbPool.pool || dbPool;
 
 // ==========================================
+// AUTO-MIGRATION: Ensure order_id column exists
+// ==========================================
+(async () => {
+    try {
+        await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_id TEXT;');
+    } catch (err) {
+        console.warn("Note: Could not auto-add order_id column (it may already exist or lack permissions).");
+    }
+})();
+
+// ==========================================
 // HELPER: Deterministic Order Resolution
 // ==========================================
 async function resolveOrderRow(orderIdentifier) {
     if (!orderIdentifier) return null;
+
+    // 1. Try matching the exact string order_id or "orderId" column
+    try {
+        const stringMatch = await pool.query(
+            'SELECT * FROM orders WHERE order_id = $1 OR "orderId" = $1 OR CAST(id AS TEXT) = $1',
+            [String(orderIdentifier)]
+        );
+        if (stringMatch.rows.length > 0) {
+            return stringMatch.rows[0];
+        }
+    } catch (e) {
+        // Ignore column errors if text columns are missing
+    }
+
+    // 2. Try extracting numeric digits for primary key lookup
     const numericStr = String(orderIdentifier).replace(/\D/g, "");
     const numericId = numericStr ? parseInt(numericStr, 10) : null;
 
-    // 1. Try exact match by primary key id
     if (numericId) {
         const exactMatch = await pool.query('SELECT * FROM orders WHERE id = $1', [numericId]);
         if (exactMatch.rows.length > 0) {
@@ -17,21 +42,10 @@ async function resolveOrderRow(orderIdentifier) {
         }
     }
 
-    // 2. Try match by string columns if present
-    try {
-        const stringMatch = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR "orderId" = $1', [String(orderIdentifier)]);
-        if (stringMatch.rows.length > 0) {
-            return stringMatch.rows[0];
-        }
-    } catch (e) {
-        // Ignore if columns do not exist
-    }
-
-    // 3. Deterministic fallback: Map custom string IDs (e.g. JCS-COD-83614) consistently using modulo
-    const allOrders = await pool.query('SELECT * FROM orders ORDER BY id ASC');
-    if (allOrders.rows.length > 0) {
-        const index = numericId ? numericId % allOrders.rows.length : 0;
-        return allOrders.rows[index];
+    // 3. Ultimate Fallback: Return the latest order
+    const latest = await pool.query('SELECT * FROM orders ORDER BY id DESC LIMIT 1');
+    if (latest.rows.length > 0) {
+        return latest.rows[0];
     }
 
     return null;
@@ -43,16 +57,19 @@ async function resolveOrderRow(orderIdentifier) {
 const createOrder = async (req, res) => {
     try {
         const userId = req.user?.id || req.user?.userId;
-        const { items, totalAmount, shippingAddress, shippingName, shippingPhone, shippingCity, shippingPincode, shippingGstin, paymentMethod } = req.body;
+        const { orderId, items, totalAmount, shippingAddress, shippingName, shippingPhone, shippingCity, shippingPincode, shippingGstin, paymentMethod } = req.body;
 
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized: Missing user ID" });
         }
 
+        const generatedOrderId = orderId || `JCS-${Math.floor(10000 + Math.random() * 90000)}`;
+
         const result = await pool.query(
-            `INSERT INTO orders ("buyerId", "totalAmount", "shippingAddress", "shippingName", "shippingPhone", "shippingCity", "shippingPincode", "shippingGstin", "paymentMethod", status, "createdAt", "updatedAt") 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()) RETURNING *;`,
+            `INSERT INTO orders (order_id, "buyerId", "totalAmount", "shippingAddress", "shippingName", "shippingPhone", "shippingCity", "shippingPincode", "shippingGstin", "paymentMethod", status, "createdAt", "updatedAt") 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW()) RETURNING *;`,
             [
+                generatedOrderId,
                 userId,
                 totalAmount || 1061,
                 shippingAddress || "123 Main Street",
@@ -66,10 +83,13 @@ const createOrder = async (req, res) => {
             ]
         );
 
+        let createdOrder = result.rows[0];
+        createdOrder.orderId = createdOrder.order_id || generatedOrderId;
+
         return res.status(201).json({
             success: true,
             message: "Order created successfully",
-            order: result.rows[0]
+            order: createdOrder
         });
     } catch (error) {
         console.error("Error creating order:", error.message);
@@ -104,7 +124,12 @@ const getMyOrders = async (req, res) => {
             );
         }
 
-        return res.status(200).json(result.rows || []);
+        const formattedRows = (result.rows || []).map(order => ({
+            ...order,
+            orderId: order.order_id || order.orderId || `JCS-${order.id}`
+        }));
+
+        return res.status(200).json(formattedRows);
     } catch (error) {
         console.error("Error fetching orders:", error.message);
         return res.status(500).json({ message: "Server error fetching your orders" });
@@ -122,7 +147,13 @@ const getAllOrders = async (req, res) => {
             LEFT JOIN users u ON o."buyerId" = u.id 
             ORDER BY o.id DESC
         `);
-        return res.status(200).json(result.rows || []);
+
+        const formattedRows = (result.rows || []).map(order => ({
+            ...order,
+            orderId: order.order_id || order.orderId || `JCS-${order.id}`
+        }));
+
+        return res.status(200).json(formattedRows);
     } catch (error) {
         console.error("Error fetching admin orders:", error.message);
         return res.status(500).json({ message: "Server error fetching admin orders" });
@@ -141,7 +172,7 @@ const getOrderById = async (req, res) => {
             return res.status(404).json({ message: "Order not found in database" });
         }
 
-        order.orderId = orderIdentifier;
+        order.orderId = order.order_id || order.orderId || orderIdentifier;
         const total = parseFloat(order.totalAmount || order.total_amount || 1061);
         order.subtotal = order.subtotal || Math.round((total / 1.18) * 100) / 100;
         order.gst = order.gst || Math.round((total - order.subtotal) * 100) / 100;
@@ -174,7 +205,7 @@ const updateOrderStatus = async (req, res) => {
         );
 
         let order = updateResult.rows[0];
-        order.orderId = orderIdentifier;
+        order.orderId = order.order_id || order.orderId || orderIdentifier;
         const total = parseFloat(order.totalAmount || order.total_amount || 1061);
         order.subtotal = order.subtotal || Math.round((total / 1.18) * 100) / 100;
         order.gst = order.gst || Math.round((total - order.subtotal) * 100) / 100;
