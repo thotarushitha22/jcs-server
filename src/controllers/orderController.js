@@ -4,6 +4,7 @@ const pool = dbPool.pool || dbPool;
 // ==========================================
 // AUTO-MIGRATION
 // ==========================================
+
 (async () => {
     try {
         await pool.query(`
@@ -27,6 +28,7 @@ const pool = dbPool.pool || dbPool;
         `);
 
         console.log("Order table migration check completed.");
+
     } catch (err) {
         console.error(
             "Order migration warning:",
@@ -166,12 +168,11 @@ async function resolveOrderRow(orderIdentifier) {
 
 
     // IMPORTANT:
-    // Never automatically return the latest order.
-    // That could update the wrong customer's order.
+    // Never automatically return latest order.
+    // This prevents updating/viewing the wrong order.
 
     return null;
 }
-
 
 
 // ==========================================
@@ -333,7 +334,6 @@ const formatOrder = (order) => {
 };
 
 
-
 // ==========================================
 // CREATE ORDER
 // POST /api/orders
@@ -342,6 +342,10 @@ const formatOrder = (order) => {
 const createOrder = async (req, res) => {
 
     try {
+
+        // ==========================================
+        // GET LOGGED-IN USER
+        // ==========================================
 
         const userId =
             req.user?.id ||
@@ -386,7 +390,7 @@ const createOrder = async (req, res) => {
 
 
         // ==========================================
-        // ORDER ID
+        // GENERATE ORDER ID
         // ==========================================
 
         const generatedOrderId =
@@ -446,7 +450,8 @@ const createOrder = async (req, res) => {
         finalStatus =
             String(finalStatus)
                 .trim()
-                .toLowerCase();
+                .toLowerCase()
+                .replace(/[\s-]+/g, "_");
 
 
         const allowedStatuses = [
@@ -484,7 +489,7 @@ const createOrder = async (req, res) => {
         const finalPaymentTitle =
             payment_method_title ||
             (
-                finalPaymentMethod
+                String(finalPaymentMethod)
                     .toLowerCase()
                     .includes("razorpay")
                     ? "Razorpay"
@@ -494,6 +499,9 @@ const createOrder = async (req, res) => {
 
         // ==========================================
         // INSERT ORDER
+        //
+        // IMPORTANT:
+        // buyerId = currently logged-in customer
         // ==========================================
 
         const result =
@@ -606,7 +614,30 @@ const createOrder = async (req, res) => {
 
 
         console.log(
-            `Order created: ${createdOrder.orderId}`
+            "===================================="
+        );
+
+        console.log(
+            "ORDER CREATED"
+        );
+
+        console.log(
+            "Order ID:",
+            createdOrder.orderId
+        );
+
+        console.log(
+            "Customer ID:",
+            userId
+        );
+
+        console.log(
+            "Status:",
+            createdOrder.status
+        );
+
+        console.log(
+            "===================================="
         );
 
 
@@ -646,10 +677,12 @@ const createOrder = async (req, res) => {
 };
 
 
-
 // ==========================================
 // GET CUSTOMER ORDERS
 // GET /api/orders
+//
+// IMPORTANT:
+// ONLY THE LOGGED-IN CUSTOMER'S ORDERS
 // ==========================================
 
 const getMyOrders = async (req, res) => {
@@ -660,12 +693,6 @@ const getMyOrders = async (req, res) => {
             req.user?.id ||
             req.user?.userId ||
             req.user?._id;
-
-
-        const userRole =
-            String(
-                req.user?.role || ""
-            ).toLowerCase();
 
 
         if (!userId) {
@@ -680,64 +707,38 @@ const getMyOrders = async (req, res) => {
         }
 
 
-        let result;
-
-
         // ==========================================
-        // ADMIN / MERCHANT
-        // ==========================================
-
-        if (
-            userRole === "merchant" ||
-            userRole === "seller" ||
-            userRole === "admin"
-        ) {
-
-            result =
-                await pool.query(
-                    `
-                    SELECT
-                        o.*,
-                        u.name AS buyer_name,
-                        u.email AS buyer_email
-                    FROM orders o
-                    LEFT JOIN users u
-                        ON o."buyerId" = u.id
-                    ORDER BY o.id DESC
-                    `
-                );
-
-        }
-
-            // ==========================================
-            // CUSTOMER
+        // CUSTOMER ONLY
+        //
+        // DO NOT RETURN ALL ORDERS HERE.
         // ==========================================
 
-        else {
-
-            result =
-                await pool.query(
-                    `
-                    SELECT
-                        o.*,
-                        u.name AS buyer_name,
-                        u.email AS buyer_email
-                    FROM orders o
-                    LEFT JOIN users u
-                        ON o."buyerId" = u.id
-                    WHERE o."buyerId" = $1
-                    ORDER BY o.id DESC
-                    `,
-                    [userId]
-                );
-
-        }
+        const result =
+            await pool.query(
+                `
+                SELECT
+                    o.*,
+                    u.name AS buyer_name,
+                    u.email AS buyer_email
+                FROM orders o
+                LEFT JOIN users u
+                    ON o."buyerId" = u.id
+                WHERE o."buyerId" = $1
+                ORDER BY o.id DESC
+                `,
+                [userId]
+            );
 
 
         const formattedRows =
             (
                 result.rows || []
             ).map(formatOrder);
+
+
+        console.log(
+            `Customer ${userId} fetched ${formattedRows.length} orders`
+        );
 
 
         return res.status(200).json({
@@ -753,7 +754,7 @@ const getMyOrders = async (req, res) => {
     } catch (error) {
 
         console.error(
-            "Error fetching orders:",
+            "Error fetching customer orders:",
             error.message
         );
 
@@ -761,7 +762,7 @@ const getMyOrders = async (req, res) => {
         return res.status(500).json({
 
             message:
-                "Server error fetching orders"
+                "Server error fetching customer orders"
 
         });
 
@@ -770,10 +771,10 @@ const getMyOrders = async (req, res) => {
 };
 
 
-
 // ==========================================
 // GET ALL ORDERS
-// ADMIN
+// ADMIN / MERCHANT
+//
 // GET /api/orders/admin/all
 // ==========================================
 
@@ -832,10 +833,15 @@ const getAllOrders = async (req, res) => {
 };
 
 
-
 // ==========================================
 // GET SINGLE ORDER
 // GET /api/orders/:id
+//
+// CUSTOMER:
+//   Can ONLY view own order
+//
+// ADMIN / MERCHANT:
+//   Can view any order
 // ==========================================
 
 const getOrderById = async (req, res) => {
@@ -845,6 +851,38 @@ const getOrderById = async (req, res) => {
         const orderIdentifier =
             req.params.id;
 
+
+        const userId =
+            req.user?.id ||
+            req.user?.userId ||
+            req.user?._id;
+
+
+        const userRole =
+            String(
+                req.user?.role || ""
+            ).toLowerCase();
+
+
+        // ==========================================
+        // CHECK LOGIN
+        // ==========================================
+
+        if (!userId) {
+
+            return res.status(401).json({
+
+                message:
+                    "Unauthorized"
+
+            });
+
+        }
+
+
+        // ==========================================
+        // FIND ORDER
+        // ==========================================
 
         const orderRow =
             await resolveOrderRow(
@@ -864,13 +902,42 @@ const getOrderById = async (req, res) => {
         }
 
 
-        let order =
-            orderRow;
+        // ==========================================
+        // CUSTOMER OWNERSHIP CHECK
+        // ==========================================
+
+        const isPrivilegedUser =
+            userRole === "admin" ||
+            userRole === "merchant" ||
+            userRole === "seller";
+
+
+        if (!isPrivilegedUser) {
+
+            if (
+                String(orderRow.buyerId) !==
+                String(userId)
+            ) {
+
+                return res.status(403).json({
+
+                    message:
+                        "You are not authorized to view this order"
+
+                });
+
+            }
+
+        }
 
 
         // ==========================================
         // GET BUYER
         // ==========================================
+
+        let order =
+            orderRow;
+
 
         if (orderRow.buyerId) {
 
@@ -903,6 +970,10 @@ const getOrderById = async (req, res) => {
 
         }
 
+
+        // ==========================================
+        // FORMAT ORDER
+        // ==========================================
 
         const formattedOrder =
             formatOrder(order);
@@ -939,7 +1010,6 @@ const getOrderById = async (req, res) => {
     }
 
 };
-
 
 
 // ==========================================
@@ -1080,7 +1150,7 @@ const updateOrderStatus = async (req, res) => {
 
 
         // ==========================================
-        // UPDATE
+        // UPDATE STATUS
         // ==========================================
 
         const updateResult =
@@ -1132,7 +1202,20 @@ const updateOrderStatus = async (req, res) => {
 
 
         console.log(
+            "===================================="
+        );
+
+        console.log(
             `Order ${order.orderId} status updated to ${order.status}`
+        );
+
+        console.log(
+            "Customer ID:",
+            updateResult.rows[0].buyerId
+        );
+
+        console.log(
+            "===================================="
         );
 
 
@@ -1169,7 +1252,6 @@ const updateOrderStatus = async (req, res) => {
     }
 
 };
-
 
 
 // ==========================================
