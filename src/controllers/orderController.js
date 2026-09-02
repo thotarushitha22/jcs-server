@@ -2,13 +2,14 @@ const dbPool = require("../config/db");
 const pool = dbPool.pool || dbPool;
 
 // ==========================================
-// AUTO-MIGRATION: Ensure order_id column exists
+// AUTO-MIGRATION: Ensure order_id and items columns exist
 // ==========================================
 (async () => {
     try {
         await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_id TEXT;');
+        await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS items JSONB;');
     } catch (err) {
-        console.warn("Note: Could not auto-add order_id column (it may already exist or lack permissions).");
+        console.warn("Note: Could not auto-add columns (they may already exist or lack permissions).");
     }
 })();
 
@@ -18,7 +19,6 @@ const pool = dbPool.pool || dbPool;
 async function resolveOrderRow(orderIdentifier) {
     if (!orderIdentifier) return null;
 
-    // 1. Try matching the exact string order_id or "orderId" column
     try {
         const stringMatch = await pool.query(
             'SELECT * FROM orders WHERE order_id = $1 OR "orderId" = $1 OR CAST(id AS TEXT) = $1',
@@ -27,11 +27,8 @@ async function resolveOrderRow(orderIdentifier) {
         if (stringMatch.rows.length > 0) {
             return stringMatch.rows[0];
         }
-    } catch (e) {
-        // Ignore column errors if text columns are missing
-    }
+    } catch (e) {}
 
-    // 2. Try extracting numeric digits for primary key lookup
     const numericStr = String(orderIdentifier).replace(/\D/g, "");
     const numericId = numericStr ? parseInt(numericStr, 10) : null;
 
@@ -42,7 +39,6 @@ async function resolveOrderRow(orderIdentifier) {
         }
     }
 
-    // 3. Ultimate Fallback: Return the latest order
     const latest = await pool.query('SELECT * FROM orders ORDER BY id DESC LIMIT 1');
     if (latest.rows.length > 0) {
         return latest.rows[0];
@@ -64,13 +60,15 @@ const createOrder = async (req, res) => {
         }
 
         const generatedOrderId = orderId || `JCS-${Math.floor(10000 + Math.random() * 90000)}`;
+        const parsedItems = JSON.stringify(items || [{ title: "65W GaN Fast Charger — Bulk Pack", quantity: 1, price: 899 }]);
 
         const result = await pool.query(
-            `INSERT INTO orders (order_id, "buyerId", "totalAmount", "shippingAddress", "shippingName", "shippingPhone", "shippingCity", "shippingPincode", "shippingGstin", "paymentMethod", status, "createdAt", "updatedAt") 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW()) RETURNING *;`,
+            `INSERT INTO orders (order_id, "buyerId", items, "totalAmount", "shippingAddress", "shippingName", "shippingPhone", "shippingCity", "shippingPincode", "shippingGstin", "paymentMethod", status, "createdAt", "updatedAt") 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()) RETURNING *;`,
             [
                 generatedOrderId,
                 userId,
+                parsedItems,
                 totalAmount || 1061,
                 shippingAddress || "123 Main Street",
                 shippingName || "",
@@ -173,11 +171,6 @@ const getOrderById = async (req, res) => {
         }
 
         order.orderId = order.order_id || order.orderId || orderIdentifier;
-        const total = parseFloat(order.totalAmount || order.total_amount || 1061);
-        order.subtotal = order.subtotal || Math.round((total / 1.18) * 100) / 100;
-        order.gst = order.gst || Math.round((total - order.subtotal) * 100) / 100;
-        order.status = order.status || "Pending";
-
         return res.status(200).json({ order });
     } catch (error) {
         console.error("Fetch order by ID error:", error.message);
@@ -194,7 +187,6 @@ const updateOrderStatus = async (req, res) => {
         const { status } = req.body;
 
         const targetOrder = await resolveOrderRow(orderIdentifier);
-
         if (!targetOrder) {
             return res.status(404).json({ message: "Order not found in database to update" });
         }
@@ -206,9 +198,6 @@ const updateOrderStatus = async (req, res) => {
 
         let order = updateResult.rows[0];
         order.orderId = order.order_id || order.orderId || orderIdentifier;
-        const total = parseFloat(order.totalAmount || order.total_amount || 1061);
-        order.subtotal = order.subtotal || Math.round((total / 1.18) * 100) / 100;
-        order.gst = order.gst || Math.round((total - order.subtotal) * 100) / 100;
 
         return res.status(200).json({
             success: true,
