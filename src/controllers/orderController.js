@@ -2,7 +2,7 @@ const dbPool = require("../config/db");
 const pool = dbPool.pool || dbPool;
 
 // ==========================================
-// CREATE ORDER (Includes timestamps for Neon schema)
+// CREATE ORDER
 // ==========================================
 const createOrder = async (req, res) => {
     try {
@@ -46,7 +46,7 @@ const createOrder = async (req, res) => {
 };
 
 // ==========================================
-// CUSTOMER & MERCHANT: GET ORDERS (Role-Aware)
+// GET ORDERS (Role-Aware)
 // ==========================================
 const getMyOrders = async (req, res) => {
     try {
@@ -99,37 +99,18 @@ const getAllOrders = async (req, res) => {
 };
 
 // ==========================================
-// GET ORDER BY ID (Foolproof Universal Lookup)
+// GET ORDER BY ID (Strict Match)
 // ==========================================
 const getOrderById = async (req, res) => {
     try {
-        const orderIdentifier = req.params.id; // e.g., "12", "JCS-12", or "JCS-RAZORPAY_SANDBOX-45178"
-        const numericId = orderIdentifier.replace(/\D/g, ""); // Extracts digits if present
+        const orderIdentifier = req.params.id;
+        const numericId = orderIdentifier.replace(/\D/g, "");
 
-        let result = null;
-
-        // 1. Try finding by the exact numeric ID if digits exist
-        if (numericId) {
-            result = await pool.query('SELECT * FROM orders WHERE id = $1', [numericId]);
+        if (!numericId) {
+            return res.status(400).json({ message: "Invalid Order ID format" });
         }
 
-        // 2. If not found, try matching by text/string ID columns if your schema has them
-        if (!result || result.rows.length === 0) {
-            try {
-                result = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR "orderId" = $1', [orderIdentifier]);
-            } catch (err) {
-                // Ignore if columns don't exist
-            }
-        }
-
-        // 3. Fallback: map distinct numeric tokens to different table rows safely
-        if (!result || result.rows.length === 0) {
-            const allOrders = await pool.query('SELECT * FROM orders ORDER BY id DESC');
-            if (allOrders.rows.length > 0) {
-                const index = numericId ? parseInt(numericId) % allOrders.rows.length : 0;
-                result = { rows: [allOrders.rows[index] || allOrders.rows[0]] };
-            }
-        }
+        const result = await pool.query('SELECT * FROM orders WHERE id = $1', [numericId]);
 
         if (!result || result.rows.length === 0) {
             return res.status(404).json({ message: "Order not found in database" });
@@ -137,7 +118,7 @@ const getOrderById = async (req, res) => {
 
         let order = result.rows[0];
 
-        // Ensure subtotal, GST, and status are properly calculated and populated
+        // Format subtotal and GST
         const total = parseFloat(order.totalAmount || order.total_amount || 1061);
         order.subtotal = order.subtotal || Math.round((total / 1.18) * 100) / 100;
         order.gst = order.gst || Math.round((total - order.subtotal) * 100) / 100;
@@ -151,7 +132,7 @@ const getOrderById = async (req, res) => {
 };
 
 // ==========================================
-// UPDATE ORDER STATUS (Smart Fallback Update)
+// UPDATE ORDER STATUS (Strict Numeric ID Match)
 // ==========================================
 const updateOrderStatus = async (req, res) => {
     try {
@@ -159,21 +140,14 @@ const updateOrderStatus = async (req, res) => {
         const numericId = orderIdentifier.replace(/\D/g, "");
         const { status } = req.body;
 
-        let result = null;
-
-        if (numericId) {
-            result = await pool.query(
-                'UPDATE orders SET status = $1, "updatedAt" = NOW() WHERE id = $2 RETURNING *;',
-                [status, numericId]
-            );
+        if (!numericId) {
+            return res.status(400).json({ message: "Invalid Order ID for update" });
         }
 
-        if (!result || result.rows.length === 0) {
-            result = await pool.query(
-                'UPDATE orders SET status = $1, "updatedAt" = NOW() WHERE id = (SELECT id FROM orders ORDER BY id DESC LIMIT 1) RETURNING *;',
-                [status]
-            );
-        }
+        const result = await pool.query(
+            'UPDATE orders SET status = $1, "updatedAt" = NOW() WHERE id = $2 RETURNING *;',
+            [status, numericId]
+        );
 
         if (!result || result.rows.length === 0) {
             return res.status(404).json({ message: "Order not found in database to update" });
