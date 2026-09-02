@@ -101,18 +101,21 @@ const getAllOrders = async (req, res) => {
 };
 
 // ==========================================
-// GET ORDER BY ID
+// GET ORDER BY ID (Supports text IDs & numeric IDs)
 // ==========================================
 const getOrderById = async (req, res) => {
     try {
-        const orderIdentifier = req.params.id;
+        const orderIdentifier = req.params.id; // e.g. "JCS-12" or "JCS-RAZORPAY_SANDBOX-45178"
+        const cleanId = orderIdentifier.replace(/^JCS-/, "").trim();
         const numericId = orderIdentifier.replace(/\D/g, "");
 
-        if (!numericId) {
-            return res.status(404).json({ message: "Order not found in database (invalid numeric format)" });
-        }
-
-        const result = await pool.query('SELECT * FROM orders WHERE id = $1', [numericId]);
+        const result = await pool.query(
+            `SELECT * FROM orders 
+             WHERE id::text = $1 OR id::text = $2 OR id::text = $3 
+                OR order_id = $1 OR order_id = $2 OR order_id = $3
+                OR "orderId" = $1 OR "orderId" = $2 OR "orderId" = $3`,
+            [orderIdentifier, cleanId, numericId]
+        );
 
         if (!result || result.rows.length === 0) {
             return res.status(404).json({ message: "Order not found in database" });
@@ -126,21 +129,23 @@ const getOrderById = async (req, res) => {
 };
 
 // ==========================================
-// UPDATE ORDER STATUS
+// UPDATE ORDER STATUS (Supports text IDs & numeric IDs)
 // ==========================================
 const updateOrderStatus = async (req, res) => {
     try {
         const orderIdentifier = req.params.id;
+        const cleanId = orderIdentifier.replace(/^JCS-/, "").trim();
         const numericId = orderIdentifier.replace(/\D/g, "");
         const { status } = req.body;
 
-        if (!numericId) {
-            return res.status(404).json({ message: "Order not found in database for update" });
-        }
-
         const result = await pool.query(
-            'UPDATE orders SET status = $1, "updatedAt" = NOW() WHERE id = $2 RETURNING *;',
-            [status, numericId]
+            `UPDATE orders 
+             SET status = $1, "updatedAt" = NOW() 
+             WHERE id::text = $2 OR id::text = $3 OR id::text = $4 
+                OR order_id = $2 OR order_id = $3 OR order_id = $4
+                OR "orderId" = $2 OR "orderId" = $3 OR "orderId" = $4
+             RETURNING *;`,
+            [status, orderIdentifier, cleanId, numericId]
         );
 
         if (!result || result.rows.length === 0) {
