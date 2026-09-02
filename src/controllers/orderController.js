@@ -65,18 +65,34 @@ async function resolveOrderRow(orderIdentifier) {
 const createOrder = async (req, res) => {
     try {
         const userId = req.user?.id || req.user?.userId;
-        const { orderId, items, totalAmount, shippingAddress, shippingName, shippingPhone, shippingCity, shippingPincode, shippingGstin, paymentMethod } = req.body;
+        const {
+            orderId,
+            items,
+            totalAmount,
+            shippingAddress,
+            shippingName,
+            shippingPhone,
+            shippingCity,
+            shippingPincode,
+            shippingGstin,
+            paymentMethod,
+            payment_method_title
+        } = req.body;
 
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized: Missing user ID" });
         }
 
         const generatedOrderId = orderId || `JCS-${Math.floor(10000 + Math.random() * 90000)}`;
-        const parsedItems = JSON.stringify(items || [{ title: "Product Item", quantity: 1, price: totalAmount || 1061 }]);
+        const parsedItems = typeof items === 'string' ? items : JSON.stringify(items || [{ title: "Product Item", quantity: 1, price: totalAmount || 1061 }]);
 
         const result = await pool.query(
-            `INSERT INTO orders (order_id, "buyerId", items, "totalAmount", "shippingAddress", "shippingName", "shippingPhone", "shippingCity", "shippingPincode", "shippingGstin", "paymentMethod", status, "createdAt", "updatedAt") 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()) RETURNING *;`,
+            `INSERT INTO orders (
+                order_id, "buyerId", items, "totalAmount", "shippingAddress", 
+                "shippingName", "shippingPhone", "shippingCity", "shippingPincode", 
+                "shippingGstin", "paymentMethod", payment_method_title, status, "createdAt", "updatedAt"
+            ) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()) RETURNING *;`,
             [
                 generatedOrderId,
                 userId,
@@ -89,6 +105,7 @@ const createOrder = async (req, res) => {
                 shippingPincode || "",
                 shippingGstin || null,
                 paymentMethod || "COD",
+                payment_method_title || (paymentMethod === 'online' ? 'Razorpay' : 'Cash on Delivery'),
                 "Pending"
             ]
         );
@@ -103,7 +120,7 @@ const createOrder = async (req, res) => {
         });
     } catch (error) {
         console.error("Error creating order:", error.message);
-        return res.status(500).json({ message: "Server error creating order" });
+        return res.status(500).json({ message: "Server error creating order", error: error.message });
     }
 };
 
@@ -136,7 +153,7 @@ const getMyOrders = async (req, res) => {
             orderId: order.order_id || order.orderId || `JCS-${order.id}`
         }));
 
-        return res.status(200).json(formattedRows);
+        return res.status(200).json({ success: true, orders: formattedRows });
     } catch (error) {
         console.error("Error fetching orders:", error.message);
         return res.status(500).json({ message: "Server error fetching your orders" });
@@ -157,7 +174,8 @@ const getAllOrders = async (req, res) => {
             orderId: order.order_id || order.orderId || `JCS-${order.id}`
         }));
 
-        return res.status(200).json(formattedRows);
+        // Supporting both array return or object wrap depending on frontend expectations
+        return res.status(200).json({ success: true, orders: formattedRows });
     } catch (error) {
         console.error("Error fetching admin orders:", error.message);
         return res.status(500).json({ message: "Server error fetching admin orders" });
@@ -174,7 +192,7 @@ const getOrderById = async (req, res) => {
         }
 
         order.orderId = order.order_id || order.orderId || orderIdentifier;
-        return res.status(200).json({ order });
+        return res.status(200).json({ success: true, order });
     } catch (error) {
         console.error("Fetch order by ID error:", error.message);
         return res.status(500).json({ message: "Server error fetching order" });
