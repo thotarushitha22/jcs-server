@@ -64,37 +64,42 @@ router.get("/orders", async (req, res) => {
     }
 });
 
-// 4. PUT Update Order Status for Admin (Safe Query Version)
+// 4. PUT Update Order Status for Admin (Robust Multi-Column Query)
 router.put("/orders/:id/status", async (req, res) => {
     try {
-        const orderId = req.params.id;
+        const orderId = req.params.id; // e.g. "JCS-12" or "JCS-RAZORPAY_SANDBOX-45178"
         const { status } = req.body;
 
-        // Clean up ID format if it contains "JCS-" prefix
         const cleanId = orderId.replace(/^JCS-/, "").trim();
 
-        let result;
-        try {
-            result = await pool.query(
-                'UPDATE orders SET status = $1 WHERE id = $2 OR id::text = $2 RETURNING *',
-                [status, cleanId]
-            );
-        } catch (dbErr) {
-            console.warn("Primary order status update query failed, using fallback response:", dbErr.message);
-            result = { rowCount: 1, rows: [{ id: cleanId, status }] };
+        const result = await pool.query(
+            `UPDATE orders 
+             SET status = $1 
+             WHERE order_id = $2 OR orderId = $2 OR id::text = $2 
+                OR order_id = $3 OR orderId = $3 OR id::text = $3
+             RETURNING *`,
+            [status, orderId, cleanId]
+        );
+
+        if (result.rowCount === 0) {
+            console.warn(`Order status update warning: No row matched ID ${orderId} or ${cleanId}`);
+            return res.status(404).json({
+                success: false,
+                message: "Order not found in database"
+            });
         }
 
         return res.status(200).json({
             success: true,
-            message: "Order status updated successfully!",
-            order: result.rows && result.rows[0] ? result.rows[0] : { id: cleanId, status }
+            message: "Order status updated successfully in database!",
+            order: result.rows[0]
         });
     } catch (error) {
         console.error("Error updating order status:", error.message);
-        return res.status(200).json({
-            success: true,
-            message: "Status updated locally",
-            status
+        return res.status(500).json({
+            success: false,
+            message: "Server error updating order status",
+            error: error.message
         });
     }
 });
