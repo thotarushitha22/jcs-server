@@ -10,11 +10,6 @@ const {
 
 const authModule = require("../middleware/auth");
 
-
-// ==========================================
-// AUTH MIDDLEWARE
-// ==========================================
-
 let protect;
 let sellerOnly;
 
@@ -45,12 +40,12 @@ if (typeof authModule === "function") {
 
     sellerOnly =
         (req, res, next) => next();
+
 }
 
 
 // ==========================================
 // CREATE ORDER
-// POST /api/orders
 // ==========================================
 
 router.post(
@@ -62,16 +57,7 @@ router.post(
 
 // ==========================================
 // CUSTOMER ORDERS
-// GET /api/orders
-// GET /api/orders/mine
-// GET /api/orders/myorders
 // ==========================================
-
-router.get(
-    "/",
-    protect,
-    getMyOrders
-);
 
 router.get(
     "/mine",
@@ -85,10 +71,15 @@ router.get(
     getMyOrders
 );
 
+router.get(
+    "/",
+    protect,
+    getMyOrders
+);
+
 
 // ==========================================
 // ADMIN ALL ORDERS
-// GET /api/orders/admin/all
 // ==========================================
 
 router.get(
@@ -100,8 +91,7 @@ router.get(
 
 
 // ==========================================
-// GET SINGLE ORDER
-// GET /api/orders/:id
+// SINGLE ORDER
 // ==========================================
 
 router.get(
@@ -113,7 +103,6 @@ router.get(
 
 // ==========================================
 // UPDATE ORDER STATUS
-// PUT /api/orders/:id/status
 // ==========================================
 
 router.put(
