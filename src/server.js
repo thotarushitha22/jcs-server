@@ -25,7 +25,11 @@ const allowedOrigins = [
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:5175",
-    "http://localhost:3000"
+    "http://localhost:3000",
+
+    // Cloudflare frontends
+    "https://jcs-admin.thotarushitha22.workers.dev",
+    "https://jcs.thotarushitha22.workers.dev"
 ];
 
 app.use(cors({
