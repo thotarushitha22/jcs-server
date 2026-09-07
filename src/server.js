@@ -41,6 +41,7 @@ const PORT = process.env.PORT || 5000;
 // =====================================================
 
 const allowedOrigins = [
+    // Local development
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:5175",
@@ -49,16 +50,15 @@ const allowedOrigins = [
     // Customer frontend
     "https://jcs.thotarushitha22.workers.dev",
 
-    // Admin frontend
+    // Admin / Merchant frontend
     "https://jcs-admin.thotarushitha22.workers.dev"
 ];
 
 app.use(
     cors({
         origin: function (origin, callback) {
-
             // Allow requests without Origin
-            // such as Postman/server requests
+            // Example: Postman or server-to-server requests
             if (!origin) {
                 return callback(null, true);
             }
@@ -102,44 +102,55 @@ app.use(
 // API ROUTES
 // =====================================================
 
-// Authentication
+// -----------------------------------------------------
+// AUTHENTICATION
+// -----------------------------------------------------
+
 app.use(
     "/api/auth",
     authRoutes
 );
 
-// Merchant dashboard
+// -----------------------------------------------------
+// MERCHANT DASHBOARD
+// -----------------------------------------------------
+
 app.use(
     "/api/merchant",
     merchantRoutes
 );
 
-// Products
+// -----------------------------------------------------
+// PRODUCTS
+// -----------------------------------------------------
+
 app.use(
     "/api/products",
     productRoutes
 );
 
-// Keep this if your existing merchant frontend
-// uses /api/merchant/product routes.
-app.use(
-    "/api/merchant",
-    productRoutes
-);
+// -----------------------------------------------------
+// ADMIN
+// -----------------------------------------------------
 
-// Admin
 app.use(
     "/api/admin",
     adminRoutes
 );
 
-// Categories
+// -----------------------------------------------------
+// CATEGORIES
+// -----------------------------------------------------
+
 app.use(
     "/api/categories",
     categoryRoutes
 );
 
-// Orders
+// -----------------------------------------------------
+// ORDERS
+// -----------------------------------------------------
+
 app.use(
     "/api/orders",
     orderRoutes
@@ -170,6 +181,8 @@ app.get("/api", (req, res) => {
 // =====================================================
 
 app.use((req, res) => {
+    console.log("404 Route:", req.method, req.originalUrl);
+
     res.status(404).json({
         message: "Route not found",
         path: req.originalUrl
@@ -181,11 +194,7 @@ app.use((req, res) => {
 // =====================================================
 
 app.use((err, req, res, next) => {
-
-    console.error(
-        "Unhandled error:",
-        err
-    );
+    console.error("Unhandled error:", err);
 
     res.status(500).json({
         message: "Internal server error",
@@ -202,10 +211,11 @@ app.use((err, req, res, next) => {
 // =====================================================
 
 app.listen(PORT, () => {
+    console.log("----------------------------------------");
+    console.log("JCSGlobal Backend Started");
+    console.log("----------------------------------------");
 
-    console.log(
-        `Server running on port ${PORT}`
-    );
+    console.log(`Server running on port ${PORT}`);
 
     console.log(
         `API: http://localhost:${PORT}/api`
@@ -214,4 +224,14 @@ app.listen(PORT, () => {
     console.log(
         `Products: http://localhost:${PORT}/api/products`
     );
+
+    console.log(
+        `Orders: http://localhost:${PORT}/api/orders`
+    );
+
+    console.log(
+        `Merchant Products: http://localhost:${PORT}/api/products/my-products`
+    );
+
+    console.log("----------------------------------------");
 });
