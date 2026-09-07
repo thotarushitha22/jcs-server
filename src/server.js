@@ -2,13 +2,24 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
-// 1. Initialize Database connection
+// =====================================================
+// DATABASE
+// =====================================================
+
 require("./config/db");
 
-// 2. Explicitly require models so they register cleanly
+// =====================================================
+// MODELS
+// =====================================================
+
 require("./models/order");
 require("./models/User");
 require("./models/Product");
+require("./models/Category");
+
+// =====================================================
+// ROUTES
+// =====================================================
 
 const authRoutes = require("./routes/authRoutes");
 const merchantRoutes = require("./routes/merchantRoutes");
@@ -17,58 +28,190 @@ const adminRoutes = require("./routes/adminRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 
+// =====================================================
+// APP
+// =====================================================
+
 const app = express();
+
 const PORT = process.env.PORT || 5000;
 
-// Allowed frontend origins (added http://localhost:5175)
+// =====================================================
+// CORS
+// =====================================================
+
 const allowedOrigins = [
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:5175",
     "http://localhost:3000",
 
-    // Cloudflare frontends
-    "https://jcs-admin.thotarushitha22.workers.dev",
-    "https://jcs.thotarushitha22.workers.dev"
+    // Customer frontend
+    "https://jcs.thotarushitha22.workers.dev",
+
+    // Admin frontend
+    "https://jcs-admin.thotarushitha22.workers.dev"
 ];
 
-app.use(cors({
-    origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps, Postman, or server-to-server)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
-            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
-        }
-        return callback(null, true);
-    },
-    credentials: true
-}));
+app.use(
+    cors({
+        origin: function (origin, callback) {
 
-// INCREASE PAYLOAD LIMIT (supports large image/KYC payloads)
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+            // Allow requests without Origin
+            // such as Postman/server requests
+            if (!origin) {
+                return callback(null, true);
+            }
 
-app.use("/api/auth", authRoutes);
-app.use("/api/merchant", merchantRoutes);
-app.use("/api/merchant", productRoutes);  // Catches /api/merchant/products requests
-app.use("/api/products", productRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/categories", categoryRoutes);
-app.use("/api/orders", orderRoutes);
+            if (allowedOrigins.includes(origin)) {
+                return callback(null, true);
+            }
+
+            console.log("Blocked CORS origin:", origin);
+
+            return callback(
+                new Error(
+                    "The CORS policy for this site does not allow access from the specified Origin."
+                ),
+                false
+            );
+        },
+
+        credentials: true
+    })
+);
+
+// =====================================================
+// BODY PARSING
+// =====================================================
+
+app.use(
+    express.json({
+        limit: "50mb"
+    })
+);
+
+app.use(
+    express.urlencoded({
+        limit: "50mb",
+        extended: true
+    })
+);
+
+// =====================================================
+// API ROUTES
+// =====================================================
+
+// Authentication
+app.use(
+    "/api/auth",
+    authRoutes
+);
+
+// Merchant dashboard
+app.use(
+    "/api/merchant",
+    merchantRoutes
+);
+
+// Products
+app.use(
+    "/api/products",
+    productRoutes
+);
+
+// Keep this if your existing merchant frontend
+// uses /api/merchant/product routes.
+app.use(
+    "/api/merchant",
+    productRoutes
+);
+
+// Admin
+app.use(
+    "/api/admin",
+    adminRoutes
+);
+
+// Categories
+app.use(
+    "/api/categories",
+    categoryRoutes
+);
+
+// Orders
+app.use(
+    "/api/orders",
+    orderRoutes
+);
+
+// =====================================================
+// HOME / HEALTH CHECK
+// =====================================================
 
 app.get("/", (req, res) => {
-    res.json({ message: "JCSGlobal E-Commerce API is running successfully!" });
-});
-
-app.use((err, req, res, next) => {
-    console.error("Unhandled error stack:", err.stack);
-    res.status(500).json({
-        message: "Internal server error",
-        error: process.env.NODE_ENV === "development" ? err.message : undefined
+    res.json({
+        message: "JCSGlobal E-Commerce API is running successfully!"
     });
 });
 
+// =====================================================
+// API HEALTH CHECK
+// =====================================================
+
+app.get("/api", (req, res) => {
+    res.json({
+        message: "JCSGlobal API is running successfully!"
+    });
+});
+
+// =====================================================
+// 404 HANDLER
+// =====================================================
+
+app.use((req, res) => {
+    res.status(404).json({
+        message: "Route not found",
+        path: req.originalUrl
+    });
+});
+
+// =====================================================
+// ERROR HANDLER
+// =====================================================
+
+app.use((err, req, res, next) => {
+
+    console.error(
+        "Unhandled error:",
+        err
+    );
+
+    res.status(500).json({
+        message: "Internal server error",
+
+        error:
+            process.env.NODE_ENV === "development"
+                ? err.message
+                : undefined
+    });
+});
+
+// =====================================================
+// START SERVER
+// =====================================================
+
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+
+    console.log(
+        `Server running on port ${PORT}`
+    );
+
+    console.log(
+        `API: http://localhost:${PORT}/api`
+    );
+
+    console.log(
+        `Products: http://localhost:${PORT}/api/products`
+    );
 });
