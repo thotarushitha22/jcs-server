@@ -139,6 +139,15 @@ const Product = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true
         },
+        processor: {
+            type: DataTypes.STRING,
+            allowNull: true
+        },
+
+        battery: {
+            type: DataTypes.STRING,
+            allowNull: true
+        },
 
         networkGen: {
             type: DataTypes.STRING,
