@@ -2,63 +2,52 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
-// =====================================================
+// ===============================
 // DATABASE
-// =====================================================
-
+// ===============================
 require("./config/db");
 
-// =====================================================
+// ===============================
 // MODELS
-// =====================================================
-
+// ===============================
 require("./models/order");
 require("./models/User");
 require("./models/Product");
 require("./models/Category");
 
-// =====================================================
+// ===============================
 // ROUTES
-// =====================================================
-
+// ===============================
 const authRoutes = require("./routes/authRoutes");
 const merchantRoutes = require("./routes/merchantRoutes");
 const productRoutes = require("./routes/productRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
 const orderRoutes = require("./routes/orderRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
 
-// =====================================================
+// ===============================
 // APP
-// =====================================================
-
+// ===============================
 const app = express();
-
 const PORT = process.env.PORT || 5000;
 
-// =====================================================
+// ===============================
 // CORS
-// =====================================================
-
+// ===============================
 const allowedOrigins = [
-    // Local development
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:5175",
     "http://localhost:3000",
 
-    // Customer frontend
     "https://jcs.thotarushitha22.workers.dev",
-
-    // Admin / Merchant frontend
-    "https://jcs-admin.thotarushitha22.workers.dev"
+    "https://jcs-admin.thotarushitha22.workers.dev",
 ];
 
 app.use(
     cors({
         origin: function (origin, callback) {
-            // Allow requests without Origin
-            // Example: Postman or server-to-server requests
             if (!origin) {
                 return callback(null, true);
             }
@@ -76,162 +65,117 @@ app.use(
                 false
             );
         },
-
-        credentials: true
+        credentials: true,
     })
 );
 
-// =====================================================
-// BODY PARSING
-// =====================================================
-
+// ===============================
+// BODY PARSERS
+// ===============================
 app.use(
     express.json({
-        limit: "50mb"
+        limit: "50mb",
     })
 );
 
 app.use(
     express.urlencoded({
         limit: "50mb",
-        extended: true
+        extended: true,
     })
 );
 
-// =====================================================
+// ===============================
 // API ROUTES
-// =====================================================
+// ===============================
 
-// -----------------------------------------------------
-// AUTHENTICATION
-// -----------------------------------------------------
+app.use("/api/auth", authRoutes);
 
-app.use(
-    "/api/auth",
-    authRoutes
-);
+app.use("/api/merchant", merchantRoutes);
 
-// -----------------------------------------------------
-// MERCHANT DASHBOARD
-// -----------------------------------------------------
+app.use("/api/products", productRoutes);
 
-app.use(
-    "/api/merchant",
-    merchantRoutes
-);
+app.use("/api/admin", adminRoutes);
 
-// -----------------------------------------------------
-// PRODUCTS
-// -----------------------------------------------------
+app.use("/api/categories", categoryRoutes);
 
-app.use(
-    "/api/products",
-    productRoutes
-);
+app.use("/api/orders", orderRoutes);
 
-// -----------------------------------------------------
-// ADMIN
-// -----------------------------------------------------
+// ===============================
+// RAZORPAY PAYMENT ROUTES
+// ===============================
 
-app.use(
-    "/api/admin",
-    adminRoutes
-);
+app.use("/api/payment", paymentRoutes);
 
-// -----------------------------------------------------
-// CATEGORIES
-// -----------------------------------------------------
-
-app.use(
-    "/api/categories",
-    categoryRoutes
-);
-
-// -----------------------------------------------------
-// ORDERS
-// -----------------------------------------------------
-
-app.use(
-    "/api/orders",
-    orderRoutes
-);
-
-// =====================================================
-// HOME / HEALTH CHECK
-// =====================================================
+// ===============================
+// HOME
+// ===============================
 
 app.get("/", (req, res) => {
     res.json({
-        message: "JCSGlobal E-Commerce API is running successfully!"
+        success: true,
+        message: "JCS Global API is running",
     });
 });
 
-// =====================================================
+// ===============================
 // API HEALTH CHECK
-// =====================================================
+// ===============================
 
 app.get("/api", (req, res) => {
     res.json({
-        message: "JCSGlobal API is running successfully!"
+        success: true,
+        message: "JCS Global API is running",
+        routes: {
+            auth: "/api/auth",
+            merchant: "/api/merchant",
+            products: "/api/products",
+            admin: "/api/admin",
+            categories: "/api/categories",
+            orders: "/api/orders",
+            payment: "/api/payment",
+        },
     });
 });
 
-// =====================================================
+// ===============================
 // 404 HANDLER
-// =====================================================
+// ===============================
 
 app.use((req, res) => {
-    console.log("404 Route:", req.method, req.originalUrl);
-
     res.status(404).json({
+        success: false,
         message: "Route not found",
-        path: req.originalUrl
+        path: req.originalUrl,
     });
 });
 
-// =====================================================
+// ===============================
 // ERROR HANDLER
-// =====================================================
+// ===============================
 
 app.use((err, req, res, next) => {
-    console.error("Unhandled error:", err);
+    console.error("SERVER ERROR:", err);
 
-    res.status(500).json({
-        message: "Internal server error",
-
-        error:
-            process.env.NODE_ENV === "development"
-                ? err.message
-                : undefined
+    res.status(err.status || 500).json({
+        success: false,
+        message: err.message || "Internal server error",
     });
 });
 
-// =====================================================
+// ===============================
 // START SERVER
-// =====================================================
+// ===============================
 
 app.listen(PORT, () => {
-    console.log("----------------------------------------");
-    console.log("JCSGlobal Backend Started");
-    console.log("----------------------------------------");
-
+    console.log("========================================");
+    console.log("JCS GLOBAL SERVER");
+    console.log("========================================");
     console.log(`Server running on port ${PORT}`);
-
+    console.log(`API:     http://localhost:${PORT}/api`);
+    console.log(`Payment: http://localhost:${PORT}/api/payment`);
     console.log(
-        `API: http://localhost:${PORT}/api`
+        `Create:  http://localhost:${PORT}/api/payment/create-order`
     );
-
-    console.log(
-        `Products: http://localhost:${PORT}/api/products`
-    );
-
-    console.log(
-        `Orders: http://localhost:${PORT}/api/orders`
-    );
-
-    console.log(
-        `Merchant Products: http://localhost:${PORT}/api/products/my-products`
-    );
-
-    console.log("----------------------------------------");
+    console.log("========================================");
 });

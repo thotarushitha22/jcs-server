@@ -7,6 +7,10 @@ const pool = dbPool.pool || dbPool;
 const multer = require("multer");
 const { protect } = require("../middleware/auth");
 
+const {
+    detectProductColour
+} = require("../services/colourDetectionService");
+
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
