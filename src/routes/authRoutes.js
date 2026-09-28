@@ -3,20 +3,8 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const nodemailer = require("nodemailer");
 const dbPool = require("../config/db");
 const pool = dbPool.pool || dbPool;
-
-// Configure Nodemailer Transporter for Real Emails
-const transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || "smtp.gmail.com",
-    port: process.env.EMAIL_PORT || 587,
-    secure: false, // true for 465, false for other ports like 587
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-    },
-});
 
 // ==========================================
 // LOGIN ROUTE
@@ -104,7 +92,7 @@ router.post("/register", async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // Normalize role (mapping 'seller' or 'merchant' appropriately)
+        // Normalize role
         let userRole = "buyer";
         if (role && ["merchant", "seller"].includes(role.toLowerCase())) {
             userRole = "merchant";
@@ -140,7 +128,7 @@ router.post("/register", async (req, res) => {
 });
 
 // ==========================================
-// FORGOT PASSWORD ROUTE (Sends Real Email)
+// FORGOT PASSWORD ROUTE (Console Log Workaround)
 // ==========================================
 router.post("/forgot-password", async (req, res) => {
     try {
@@ -161,7 +149,7 @@ router.post("/forgot-password", async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(200).json({
                 success: true,
-                message: "If that email is registered, password reset instructions have been sent."
+                message: "If that email is registered, password reset instructions have been generated."
             });
         }
 
@@ -179,31 +167,20 @@ router.post("/forgot-password", async (req, res) => {
         const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
         const resetLink = `${clientUrl}/reset-password?token=${resetToken}`;
 
-        // Send real email via Nodemailer
-        await transporter.sendMail({
-            from: `"JCSGlobal Support" <${process.env.EMAIL_USER}>`,
-            to: user.email,
-            subject: "Password Reset Request - JCSGlobal",
-            html: `
-                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-                    <h2>Password Reset Request</h2>
-                    <p>Hello ${user.name || "User"},</p>
-                    <p>We received a request to reset your password. Click the button below to reset it:</p>
-                    <a href="${resetLink}" style="display: inline-block; padding: 10px 20px; background-color: #2563eb; color: #fff; text-decoration: none; border-radius: 5px; margin: 15px 0;">Reset Password</a>
-                    <p>If you didn't request this, you can safely ignore this email. This link will expire in 15 minutes.</p>
-                    <p>Thanks,<br>JCSGlobal Team</p>
-                </div>
-            `,
-        });
+        // 🔑 PRINT TO RENDER / TERMINAL CONSOLE INSTEAD OF SMTP
+        console.log("==================================================");
+        console.log(`🔑 PASSWORD RESET LINK for ${user.email}:`);
+        console.log(resetLink);
+        console.log("==================================================");
 
         return res.status(200).json({
             success: true,
-            message: "Password reset instructions have been sent to your email."
+            message: "Password reset instructions have been generated. Check server console logs."
         });
 
     } catch (error) {
         console.error("CRITICAL FORGOT PASSWORD ERROR:", error);
-        return res.status(500).json({ message: "Server error while sending reset email", error: error.message });
+        return res.status(500).json({ message: "Server error while processing password reset", error: error.message });
     }
 });
 
