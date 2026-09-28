@@ -3,8 +3,20 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const nodemailer = require("nodemailer");
 const dbPool = require("../config/db");
 const pool = dbPool.pool || dbPool;
+
+// Configure Nodemailer Transporter for Real Emails
+const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST || "smtp.gmail.com",
+    port: process.env.EMAIL_PORT || 587,
+    secure: false, // true for 465, false for other ports like 587
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+    },
+});
 
 // ==========================================
 // LOGIN ROUTE
@@ -128,7 +140,7 @@ router.post("/register", async (req, res) => {
 });
 
 // ==========================================
-// FORGOT PASSWORD ROUTE
+// FORGOT PASSWORD ROUTE (Sends Real Email)
 // ==========================================
 router.post("/forgot-password", async (req, res) => {
     try {
@@ -158,14 +170,31 @@ router.post("/forgot-password", async (req, res) => {
         const resetExpires = new Date(Date.now() + 15 * 60 * 1000); // Token valid for 15 minutes
 
         // Store reset token and expiration time in the database
-        // Note: Make sure your `users` table has `reset_password_token` and `reset_password_expires` columns
         await pool.query(
             "UPDATE users SET reset_password_token = $1, reset_password_expires = $2 WHERE id = $3",
             [resetToken, resetExpires, user.id]
         );
 
-        // Development helper log: Check your backend server console to grab the token for local testing
-        console.log(`🔑 PASSWORD RESET TOKEN for ${normalizedEmail}: ${resetToken}`);
+        // Build frontend link
+        const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+        const resetLink = `${clientUrl}/reset-password?token=${resetToken}`;
+
+        // Send real email via Nodemailer
+        await transporter.sendMail({
+            from: `"JCSGlobal Support" <${process.env.EMAIL_USER}>`,
+            to: user.email,
+            subject: "Password Reset Request - JCSGlobal",
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+                    <h2>Password Reset Request</h2>
+                    <p>Hello ${user.name || "User"},</p>
+                    <p>We received a request to reset your password. Click the button below to reset it:</p>
+                    <a href="${resetLink}" style="display: inline-block; padding: 10px 20px; background-color: #2563eb; color: #fff; text-decoration: none; border-radius: 5px; margin: 15px 0;">Reset Password</a>
+                    <p>If you didn't request this, you can safely ignore this email. This link will expire in 15 minutes.</p>
+                    <p>Thanks,<br>JCSGlobal Team</p>
+                </div>
+            `,
+        });
 
         return res.status(200).json({
             success: true,
@@ -173,8 +202,8 @@ router.post("/forgot-password", async (req, res) => {
         });
 
     } catch (error) {
-        console.error("CRITICAL FORGOT PASSWORD ERROR:", error.message);
-        return res.status(500).json({ message: "Server error during forgot password process", error: error.message });
+        console.error("CRITICAL FORGOT PASSWORD ERROR:", error);
+        return res.status(500).json({ message: "Server error while sending reset email", error: error.message });
     }
 });
 
@@ -193,7 +222,7 @@ router.post("/reset-password", async (req, res) => {
             throw new Error("Database pool is not configured correctly.");
         }
 
-        // Find user by token and verify expiration
+        // Find user by valid unexpired token
         const result = await pool.query(
             "SELECT * FROM users WHERE reset_password_token = $1 AND reset_password_expires > NOW()",
             [token]
@@ -209,7 +238,7 @@ router.post("/reset-password", async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-        // Update password and clear out the token fields
+        // Update password and clear token fields
         await pool.query(
             "UPDATE users SET password = $1, reset_password_token = NULL, reset_password_expires = NULL WHERE id = $2",
             [hashedPassword, user.id]
