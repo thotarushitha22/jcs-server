@@ -19,7 +19,7 @@ const User = sequelize.define("User", {
     },
     password: {
         type: DataTypes.STRING,
-        allowNull: false, // stored as a bcrypt hash, never plain text
+        allowNull: false,
     },
     phone: DataTypes.STRING,
     role: {
@@ -31,9 +31,17 @@ const User = sequelize.define("User", {
         type: DataTypes.ENUM("pending", "verified", "rejected"),
         defaultValue: "pending",
     },
+    resetPasswordToken: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    resetPasswordExpires: {
+        type: DataTypes.DATE,
+        allowNull: true,
+    },
 }, {
     tableName: "users",
-    timestamps: true, // adds createdAt / updatedAt automatically
+    timestamps: true,
 });
 
 module.exports = User;

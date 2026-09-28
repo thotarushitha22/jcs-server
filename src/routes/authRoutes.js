@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const dbPool = require("../config/db");
 const pool = dbPool.pool || dbPool;
 
@@ -65,7 +66,7 @@ router.post("/login", async (req, res) => {
 });
 
 // ==========================================
-// REGISTER ROUTE (Added to fix 404 error)
+// REGISTER ROUTE
 // ==========================================
 router.post("/register", async (req, res) => {
     try {
@@ -123,6 +124,105 @@ router.post("/register", async (req, res) => {
     } catch (error) {
         console.error("CRITICAL REGISTRATION ERROR:", error.message);
         return res.status(500).json({ message: "Server error during registration", error: error.message });
+    }
+});
+
+// ==========================================
+// FORGOT PASSWORD ROUTE
+// ==========================================
+router.post("/forgot-password", async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ message: "Please provide an email address." });
+        }
+
+        if (!pool || typeof pool.query !== "function") {
+            throw new Error("Database pool is not configured correctly.");
+        }
+
+        const normalizedEmail = email.trim().toLowerCase();
+        const result = await pool.query("SELECT * FROM users WHERE email = $1", [normalizedEmail]);
+
+        // For security reasons, don't explicitly reveal whether the email exists or not
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                success: true,
+                message: "If that email is registered, password reset instructions have been sent."
+            });
+        }
+
+        const user = result.rows[0];
+        const resetToken = crypto.randomBytes(32).toString("hex");
+        const resetExpires = new Date(Date.now() + 15 * 60 * 1000); // Token valid for 15 minutes
+
+        // Store reset token and expiration time in the database
+        // Note: Make sure your `users` table has `reset_password_token` and `reset_password_expires` columns
+        await pool.query(
+            "UPDATE users SET reset_password_token = $1, reset_password_expires = $2 WHERE id = $3",
+            [resetToken, resetExpires, user.id]
+        );
+
+        // Development helper log: Check your backend server console to grab the token for local testing
+        console.log(`🔑 PASSWORD RESET TOKEN for ${normalizedEmail}: ${resetToken}`);
+
+        return res.status(200).json({
+            success: true,
+            message: "Password reset instructions have been sent to your email."
+        });
+
+    } catch (error) {
+        console.error("CRITICAL FORGOT PASSWORD ERROR:", error.message);
+        return res.status(500).json({ message: "Server error during forgot password process", error: error.message });
+    }
+});
+
+// ==========================================
+// RESET PASSWORD ROUTE
+// ==========================================
+router.post("/reset-password", async (req, res) => {
+    try {
+        const { token, newPassword } = req.body;
+
+        if (!token || !newPassword) {
+            return res.status(400).json({ message: "Token and new password are required." });
+        }
+
+        if (!pool || typeof pool.query !== "function") {
+            throw new Error("Database pool is not configured correctly.");
+        }
+
+        // Find user by token and verify expiration
+        const result = await pool.query(
+            "SELECT * FROM users WHERE reset_password_token = $1 AND reset_password_expires > NOW()",
+            [token]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(400).json({ message: "Invalid or expired password reset token." });
+        }
+
+        const user = result.rows[0];
+
+        // Hash the new password securely
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update password and clear out the token fields
+        await pool.query(
+            "UPDATE users SET password = $1, reset_password_token = NULL, reset_password_expires = NULL WHERE id = $2",
+            [hashedPassword, user.id]
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Password has been successfully reset. You can now log in."
+        });
+
+    } catch (error) {
+        console.error("CRITICAL RESET PASSWORD ERROR:", error.message);
+        return res.status(500).json({ message: "Server error during password reset", error: error.message });
     }
 });
 
