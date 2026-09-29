@@ -14,6 +14,7 @@ require("./models/order");
 require("./models/User");
 require("./models/Product");
 require("./models/Category");
+require("./models/Wishlist"); // <-- 1. Wishlist Model registered
 
 // ===============================
 // ROUTES
@@ -25,6 +26,7 @@ const adminRoutes = require("./routes/adminRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const wishlistRoutes = require("./routes/wishlistRoutes"); // <-- 2. Wishlist Routes imported
 
 // ===============================
 // APP
@@ -108,6 +110,12 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/payment", paymentRoutes);
 
 // ===============================
+// WISHLIST ROUTES
+// ===============================
+
+app.use("/api/wishlist", wishlistRoutes); // <-- 3. Wishlist Endpoint mounted
+
+// ===============================
 // HOME
 // ===============================
 
@@ -134,6 +142,7 @@ app.get("/api", (req, res) => {
             categories: "/api/categories",
             orders: "/api/orders",
             payment: "/api/payment",
+            wishlist: "/api/wishlist",
         },
     });
 });
