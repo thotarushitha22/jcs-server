@@ -1,40 +1,54 @@
-const router = require("express").Router();
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db");
+const User = require("./User");
+const Product = require("./Product");
 
-const {
-    createOrder,
-    getAllOrders,
-    getMyOrders,
-    getOrderById,
-    updateOrderStatus
-} = require("../controllers/orderController");
+const Order = sequelize.define("Order", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    totalAmount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
+    gstAmount: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+    // text instead of ENUM, so every tracking stop can be stored:
+    // PENDING, PAID, PROCESSING, SHIPPED, HUB_1..HUB_4, OUT_FOR_DELIVERY,
+    // DELIVERED, CANCELLED
+    status: {
+        type: DataTypes.STRING(30),
+        defaultValue: "PENDING",
+    },
+    paymentStatus: {
+        type: DataTypes.ENUM("pending", "paid"),
+        defaultValue: "pending",
+    },
+    paymentMethod: {
+        type: DataTypes.ENUM("upi", "credit", "cod"),
+        defaultValue: "upi",
+    },
+    shippingName: DataTypes.STRING,
+    shippingGstin: DataTypes.STRING,
+    shippingAddress: DataTypes.STRING,
+    shippingCity: DataTypes.STRING,
+    shippingPincode: DataTypes.STRING,
+    shippingPhone: DataTypes.STRING,
+}, {
+    tableName: "orders",
+    timestamps: true,
+});
 
-const authModule = require("../middleware/auth");
+// Line items — one row per product in an order, with qty/price captured
+// at the time of purchase (so later price changes don't rewrite history).
+const OrderItem = sequelize.define("OrderItem", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    qty: { type: DataTypes.INTEGER, allowNull: false },
+    priceAtPurchase: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+}, {
+    tableName: "order_items",
+    timestamps: false,
+});
 
-let protect, sellerOnly;
-if (typeof authModule === "function") {
-    protect = authModule;
-    sellerOnly = authModule;
-} else if (authModule && typeof authModule === "object") {
-    protect = authModule.protect || authModule.verifyToken || ((req, res, next) => next());
-    sellerOnly = authModule.sellerOnly || authModule.adminOnly || protect;
-} else {
-    protect = (req, res, next) => next();
-    sellerOnly = (req, res, next) => next();
-}
+Order.belongsTo(User, { foreignKey: "buyerId", as: "buyer" });
+User.hasMany(Order, { foreignKey: "buyerId" });
 
-// 1. Create order
-router.post("/", protect, createOrder);
+Order.hasMany(OrderItem, { foreignKey: "orderId", as: "items" });
+OrderItem.belongsTo(Order, { foreignKey: "orderId" });
+OrderItem.belongsTo(Product, { foreignKey: "productId", as: "product" });
 
-// 2. Customer account pages -> STRICTLY calls getMyOrders (Only returns that user's orders)
-router.get("/mine", protect, getMyOrders);
-router.get("/myorders", protect, getMyOrders);
-router.get("/", protect, getMyOrders); // Root /api/orders now strictly serves customer's own orders by default!
-
-// 3. Admin dashboard -> STRICTLY calls getAllOrders
-router.get("/admin/all", protect, sellerOnly, getAllOrders);
-
-// 4. Dynamic parameters
-router.get("/:id", protect, getOrderById);
-router.put("/:id/status", protect, sellerOnly, updateOrderStatus);
-
-module.exports = router;
+module.exports = { Order, OrderItem };

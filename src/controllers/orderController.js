@@ -1,1273 +1,167 @@
-const dbPool = require("../config/db");
-const pool = dbPool.pool || dbPool;
+const { Order, OrderItem } = require("../models/Order");
+const Product = require("../models/Product");
+const User = require("../models/User");
 
-// ==========================================
-// AUTO-MIGRATION
-// ==========================================
-
-(async () => {
+// POST /api/orders  (logged-in buyer)
+exports.createOrder = async (req, res) => {
     try {
-        await pool.query(`
-            ALTER TABLE orders
-            ADD COLUMN IF NOT EXISTS order_id TEXT;
-        `);
+        const { items, shippingName, shippingGstin, shippingAddress, shippingCity, shippingPincode, shippingPhone, paymentMethod } = req.body;
 
-        await pool.query(`
-            ALTER TABLE orders
-            ADD COLUMN IF NOT EXISTS items JSONB;
-        `);
-
-        await pool.query(`
-            ALTER TABLE orders
-            ADD COLUMN IF NOT EXISTS shipping_email TEXT;
-        `);
-
-        await pool.query(`
-            ALTER TABLE orders
-            ADD COLUMN IF NOT EXISTS payment_method_title TEXT;
-        `);
-
-        console.log("Order table migration check completed.");
-
-    } catch (err) {
-        console.error(
-            "Order migration warning:",
-            err.message
-        );
-    }
-})();
-
-
-// ==========================================
-// HELPER: RESOLVE ORDER
-// ==========================================
-
-async function resolveOrderRow(orderIdentifier) {
-
-    if (!orderIdentifier) {
-        return null;
-    }
-
-    const identifier =
-        String(orderIdentifier).trim();
-
-
-    // ==========================================
-    // 1. EXACT MATCH
-    // Search using order_id OR database id
-    // ==========================================
-
-    try {
-
-        const result = await pool.query(
-            `
-            SELECT *
-            FROM orders
-            WHERE order_id = $1
-               OR CAST(id AS TEXT) = $1
-            LIMIT 1
-            `,
-            [identifier]
-        );
-
-        if (result.rows.length > 0) {
-
-            return result.rows[0];
-
+        if (!items || items.length === 0) {
+            return res.status(400).json({ message: "Order must include at least one item" });
         }
 
-    } catch (error) {
-
-        console.error(
-            "Exact order lookup error:",
-            error.message
-        );
-
-    }
-
-
-    // ==========================================
-    // 2. NUMERIC ID MATCH
-    // ==========================================
-
-    try {
-
-        const numericStr =
-            identifier.replace(/\D/g, "");
-
-        if (numericStr) {
-
-            const numericId =
-                parseInt(numericStr, 10);
-
-            if (!Number.isNaN(numericId)) {
-
-                const result =
-                    await pool.query(
-                        `
-                        SELECT *
-                        FROM orders
-                        WHERE id = $1
-                        LIMIT 1
-                        `,
-                        [numericId]
-                    );
-
-                if (result.rows.length > 0) {
-
-                    return result.rows[0];
-
-                }
-
-            }
-
-        }
-
-    } catch (error) {
-
-        console.error(
-            "Numeric order lookup error:",
-            error.message
-        );
-
-    }
-
-
-    // ==========================================
-    // 3. PARTIAL ORDER ID MATCH
-    // ==========================================
-
-    try {
-
-        const result =
-            await pool.query(
-                `
-                SELECT *
-                FROM orders
-                WHERE order_id ILIKE $1
-                ORDER BY id DESC
-                LIMIT 1
-                `,
-                [`%${identifier}%`]
-            );
-
-        if (result.rows.length > 0) {
-
-            return result.rows[0];
-
-        }
-
-    } catch (error) {
-
-        console.error(
-            "Partial order lookup error:",
-            error.message
-        );
-
-    }
-
-
-    // IMPORTANT:
-    // Never automatically return latest order.
-    // This prevents updating/viewing the wrong order.
-
-    return null;
-}
-
-
-// ==========================================
-// HELPER: FORMAT ORDER
-// ==========================================
-
-const formatOrder = (order) => {
-
-    if (!order) {
-        return null;
-    }
-
-
-    // ==========================================
-    // PARSE ITEMS
-    // ==========================================
-
-    let parsedItems = order.items;
-
-    if (typeof parsedItems === "string") {
-
-        try {
-
-            parsedItems =
-                JSON.parse(parsedItems);
-
-        } catch (error) {
-
-            parsedItems = [];
-
-        }
-
-    }
-
-    if (!Array.isArray(parsedItems)) {
-
-        parsedItems = [];
-
-    }
-
-
-    // ==========================================
-    // NORMALIZE STATUS
-    // ==========================================
-
-    const rawStatus =
-        String(
-            order.status || "Pending"
-        )
-            .trim()
-            .toLowerCase();
-
-
-    let normalizedStatus = "Pending";
-
-
-    if (
-        rawStatus === "delivered" ||
-        rawStatus === "complete" ||
-        rawStatus === "completed"
-    ) {
-
-        normalizedStatus = "Delivered";
-
-    }
-
-    else if (
-        rawStatus === "shipped" ||
-        rawStatus === "dispatched"
-    ) {
-
-        normalizedStatus = "Shipped";
-
-    }
-
-    else if (
-        rawStatus === "processing" ||
-        rawStatus === "packed"
-    ) {
-
-        normalizedStatus = "Processing";
-
-    }
-
-    else if (
-        rawStatus === "out_for_delivery" ||
-        rawStatus === "out-for-delivery" ||
-        rawStatus === "out for delivery"
-    ) {
-
-        normalizedStatus = "Out for Delivery";
-
-    }
-
-    else if (
-        rawStatus === "cancelled" ||
-        rawStatus === "canceled"
-    ) {
-
-        normalizedStatus = "Cancelled";
-
-    }
-
-    else if (
-        rawStatus === "paid"
-    ) {
-
-        normalizedStatus = "Paid";
-
-    }
-
-    else if (
-        rawStatus === "pending" ||
-        rawStatus === "placed"
-    ) {
-
-        normalizedStatus = "Pending";
-
-    }
-
-    else {
-
-        normalizedStatus =
-            rawStatus.charAt(0).toUpperCase() +
-            rawStatus.slice(1);
-
-    }
-
-
-    // ==========================================
-    // RETURN FORMATTED ORDER
-    // ==========================================
-
-    return {
-
-        ...order,
-
-        orderId:
-            order.order_id ||
-            `JCS-${order.id}`,
-
-        items:
-        parsedItems,
-
-        shipping_email:
-            order.shipping_email ||
-            order.buyer_email ||
-            order.email ||
-            "N/A",
-
-        status:
-        normalizedStatus,
-
-        rawStatus:
-        order.status
-
-    };
-
-};
-
-
-// ==========================================
-// CREATE ORDER
-// POST /api/orders
-// ==========================================
-
-const createOrder = async (req, res) => {
-
-    try {
-
-        // ==========================================
-        // GET LOGGED-IN USER
-        // ==========================================
-
-        const userId =
-            req.user?.id ||
-            req.user?.userId ||
-            req.user?._id;
-
-
-        const {
-            orderId,
-            id,
-            order_id,
-            items,
-            orderItems,
+        const products = await Product.findAll({ where: { id: items.map((i) => i.productId) } });
+        const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
+
+        let subtotal = 0;
+        const orderItemsData = items.map(({ productId, qty }) => {
+            const product = productMap[productId];
+            if (!product) throw new Error(`Product ${productId} not found`);
+            subtotal += Number(product.price) * qty;
+            return { productId, qty, priceAtPurchase: product.price };
+        });
+
+        const gstAmount = Math.round(subtotal * 0.18);
+        const totalAmount = subtotal + gstAmount;
+
+        // UPI/Cards/Netbanking is treated as paid immediately (simulated gateway
+        // confirmation happens client-side before this request is sent).
+        // Credit terms and Cash on Delivery are settled later, so they stay "pending".
+        const method = paymentMethod || "upi";
+        const paymentStatus = method === "upi" ? "paid" : "pending";
+
+        const order = await Order.create({
+            buyerId: req.user.id,
             totalAmount,
-            totalPrice,
-            shippingAddress,
+            gstAmount,
             shippingName,
-            shippingEmail,
-            shippingPhone,
+            shippingGstin,
+            shippingAddress,
             shippingCity,
             shippingPincode,
-            shippingGstin,
-            paymentMethod,
-            payment_method_title,
-            status,
-            paymentStatus
-        } = req.body;
-
-
-        // ==========================================
-        // CHECK USER
-        // ==========================================
-
-        if (!userId) {
-
-            return res.status(401).json({
-                message:
-                    "Unauthorized: Missing user ID"
-            });
-
-        }
-
-
-        // ==========================================
-        // GENERATE ORDER ID
-        // ==========================================
-
-        const generatedOrderId =
-            orderId ||
-            order_id ||
-            id ||
-            `JCS-${Math.floor(
-                10000 +
-                Math.random() * 90000
-            )}`;
-
-
-        // ==========================================
-        // ITEMS
-        // ==========================================
-
-        const finalItems =
-            items ||
-            orderItems ||
-            [
-                {
-                    title: "Product Item",
-                    quantity: 1,
-                    qty: 1,
-                    price:
-                        totalAmount ||
-                        totalPrice ||
-                        1061
-                }
-            ];
-
-
-        const parsedItems =
-            JSON.stringify(finalItems);
-
-
-        // ==========================================
-        // TOTAL
-        // ==========================================
-
-        const finalTotal =
-            totalAmount ||
-            totalPrice ||
-            1061;
-
-
-        // ==========================================
-        // STATUS
-        // ==========================================
-
-        let finalStatus =
-            status ||
-            paymentStatus ||
-            "Pending";
-
-
-        finalStatus =
-            String(finalStatus)
-                .trim()
-                .toLowerCase()
-                .replace(/[\s-]+/g, "_");
-
-
-        const allowedStatuses = [
-            "pending",
-            "paid",
-            "processing",
-            "shipped",
-            "out_for_delivery",
-            "delivered",
-            "completed",
-            "cancelled"
-        ];
-
-
-        if (
-            !allowedStatuses.includes(
-                finalStatus
-            )
-        ) {
-
-            finalStatus = "pending";
-
-        }
-
-
-        // ==========================================
-        // PAYMENT METHOD
-        // ==========================================
-
-        const finalPaymentMethod =
-            paymentMethod ||
-            "COD";
-
-
-        const finalPaymentTitle =
-            payment_method_title ||
-            (
-                String(finalPaymentMethod)
-                    .toLowerCase()
-                    .includes("razorpay")
-                    ? "Razorpay"
-                    : finalPaymentMethod
-            );
-
-
-        // ==========================================
-        // INSERT ORDER
-        //
-        // IMPORTANT:
-        // buyerId = currently logged-in customer
-        // ==========================================
-
-        const result =
-            await pool.query(
-                `
-                INSERT INTO orders (
-
-                    order_id,
-
-                    "buyerId",
-
-                    items,
-
-                    "totalAmount",
-
-                    "shippingAddress",
-
-                    "shippingName",
-
-                    shipping_email,
-
-                    "shippingPhone",
-
-                    "shippingCity",
-
-                    "shippingPincode",
-
-                    "shippingGstin",
-
-                    "paymentMethod",
-
-                    payment_method_title,
-
-                    status,
-
-                    "createdAt",
-
-                    "updatedAt"
-
-                )
-
-                VALUES (
-
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5,
-                    $6,
-                    $7,
-                    $8,
-                    $9,
-                    $10,
-                    $11,
-                    $12,
-                    $13,
-                    $14,
-                    NOW(),
-                    NOW()
-
-                )
-
-                RETURNING *;
-                `,
-                [
-
-                    generatedOrderId,
-
-                    userId,
-
-                    parsedItems,
-
-                    finalTotal,
-
-                    shippingAddress ||
-                    "123 Main Street",
-
-                    shippingName ||
-                    "",
-
-                    shippingEmail ||
-                    "",
-
-                    shippingPhone ||
-                    "",
-
-                    shippingCity ||
-                    "",
-
-                    shippingPincode ||
-                    "",
-
-                    shippingGstin ||
-                    null,
-
-                    finalPaymentMethod,
-
-                    finalPaymentTitle,
-
-                    finalStatus
-
-                ]
-            );
-
-
-        const createdOrder =
-            formatOrder(
-                result.rows[0]
-            );
-
-
-        console.log(
-            "===================================="
-        );
-
-        console.log(
-            "ORDER CREATED"
-        );
-
-        console.log(
-            "Order ID:",
-            createdOrder.orderId
-        );
-
-        console.log(
-            "Customer ID:",
-            userId
-        );
-
-        console.log(
-            "Status:",
-            createdOrder.status
-        );
-
-        console.log(
-            "===================================="
-        );
-
-
-        return res.status(201).json({
-
-            success: true,
-
-            message:
-                "Order created successfully",
-
-            order:
-            createdOrder
-
+            shippingPhone,
+            paymentMethod: method,
+            paymentStatus,
         });
 
+        await OrderItem.bulkCreate(orderItemsData.map((item) => ({ ...item, orderId: order.id })));
 
-    } catch (error) {
-
-        console.error(
-            "Error creating order:",
-            error.message
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Server error creating order",
-
-            error:
-            error.message
-
+        const fullOrder = await Order.findByPk(order.id, {
+            include: [{ model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] }],
         });
 
+        res.status(201).json(fullOrder);
+    } catch (err) {
+        console.error(err);
+        res.status(400).json({ message: "Failed to create order", error: err.message });
     }
-
 };
 
-
-// ==========================================
-// GET CUSTOMER ORDERS
-// GET /api/orders
-//
-// IMPORTANT:
-// ONLY THE LOGGED-IN CUSTOMER'S ORDERS
-// ==========================================
-
-const getMyOrders = async (req, res) => {
-
+// GET /api/orders  (logged-in buyer's own orders)
+exports.getMyOrders = async (req, res) => {
     try {
-
-        const userId =
-            req.user?.id ||
-            req.user?.userId ||
-            req.user?._id;
-
-
-        if (!userId) {
-
-            return res.status(401).json({
-
-                message:
-                    "Unauthorized: Missing user identification"
-
-            });
-
-        }
-
-
-        // ==========================================
-        // CUSTOMER ONLY
-        //
-        // DO NOT RETURN ALL ORDERS HERE.
-        // ==========================================
-
-        const result =
-            await pool.query(
-                `
-                SELECT
-                    o.*,
-                    u.name AS buyer_name,
-                    u.email AS buyer_email
-                FROM orders o
-                LEFT JOIN users u
-                    ON o."buyerId" = u.id
-                WHERE o."buyerId" = $1
-                ORDER BY o.id DESC
-                `,
-                [userId]
-            );
-
-
-        const formattedRows =
-            (
-                result.rows || []
-            ).map(formatOrder);
-
-
-        console.log(
-            `Customer ${userId} fetched ${formattedRows.length} orders`
-        );
-
-
-        return res.status(200).json({
-
-            success: true,
-
-            orders:
-            formattedRows
-
+        const orders = await Order.findAll({
+            where: { buyerId: req.user.id },
+            include: [{ model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] }],
+            order: [["createdAt", "DESC"]],
         });
-
-
-    } catch (error) {
-
-        console.error(
-            "Error fetching customer orders:",
-            error.message
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Server error fetching customer orders"
-
-        });
-
+        res.json(orders);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to fetch orders", error: err.message });
     }
-
 };
 
-
-// ==========================================
-// GET ALL ORDERS
-// ADMIN / MERCHANT
-//
-// GET /api/orders/admin/all
-// ==========================================
-
-const getAllOrders = async (req, res) => {
-
+// GET /api/orders/all  (admin only — every order in the system)
+exports.getAllOrders = async (req, res) => {
     try {
-
-        const result =
-            await pool.query(
-                `
-                SELECT
-                    o.*,
-                    u.name AS buyer_name,
-                    u.email AS buyer_email
-                FROM orders o
-                LEFT JOIN users u
-                    ON o."buyerId" = u.id
-                ORDER BY o.id DESC
-                `
-            );
-
-
-        const formattedRows =
-            (
-                result.rows || []
-            ).map(formatOrder);
-
-
-        return res.status(200).json({
-
-            success: true,
-
-            orders:
-            formattedRows
-
+        const orders = await Order.findAll({
+            include: [
+                { model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] },
+                { model: User, as: "buyer", attributes: ["id", "name", "email"] },
+            ],
+            order: [["createdAt", "DESC"]],
         });
-
-
-    } catch (error) {
-
-        console.error(
-            "Error fetching admin orders:",
-            error.message
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Server error fetching admin orders"
-
-        });
-
+        res.json(orders);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to fetch orders", error: err.message });
     }
-
 };
 
-
-// ==========================================
-// GET SINGLE ORDER
 // GET /api/orders/:id
-//
-// CUSTOMER:
-//   Can ONLY view own order
-//
-// ADMIN / MERCHANT:
-//   Can view any order
-// ==========================================
-
-const getOrderById = async (req, res) => {
-
+exports.getOrder = async (req, res) => {
     try {
+        const order = await Order.findOne({
+            where: { id: req.params.id, buyerId: req.user.id },
+            include: [{ model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] }],
+        });
+        if (!order) return res.status(404).json({ message: "Order not found" });
+        res.json(order);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to fetch order", error: err.message });
+    }
+};
 
-        const orderIdentifier =
-            req.params.id;
+// PUT /api/orders/:id/status  (admin, or the merchant who sells an item in the order)
+//
+// Admin    -> any of the 10 tracking stops (and cancel).
+// Merchant -> only stops 1-4 (up to SHIPPED), only on orders that contain one
+//             of their own products, and not once the order is shipped.
+const ORDER_STATUSES = [
+    "PENDING", "PAID", "PROCESSING", "SHIPPED",
+    "HUB_1", "HUB_2", "HUB_3", "HUB_4",
+    "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED",
+];
 
+const MERCHANT_STATUSES = ["PENDING", "PAID", "PROCESSING", "SHIPPED"];
+const MERCHANT_LOCKED = [
+    "SHIPPED", "HUB_1", "HUB_2", "HUB_3", "HUB_4",
+    "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED",
+];
 
-        const userId =
-            req.user?.id ||
-            req.user?.userId ||
-            req.user?._id;
+exports.updateOrderStatus = async (req, res) => {
+    try {
+        const order = await Order.findByPk(req.params.id, {
+            include: [{
+                model: OrderItem,
+                as: "items",
+                include: [{ model: Product, as: "product" }],
+            }],
+        });
+        if (!order) return res.status(404).json({ message: "Order not found" });
 
-
-        const userRole =
-            String(
-                req.user?.role || ""
-            ).toLowerCase();
-
-
-        // ==========================================
-        // CHECK LOGIN
-        // ==========================================
-
-        if (!userId) {
-
-            return res.status(401).json({
-
-                message:
-                    "Unauthorized"
-
-            });
-
+        const requested = String(req.body.status || "").toUpperCase();
+        if (!ORDER_STATUSES.includes(requested)) {
+            return res.status(400).json({ message: "Invalid order status" });
         }
 
+        const role = String(req.user?.role || "").toLowerCase();
 
-        // ==========================================
-        // FIND ORDER
-        // ==========================================
-
-        const orderRow =
-            await resolveOrderRow(
-                orderIdentifier
-            );
-
-
-        if (!orderRow) {
-
-            return res.status(404).json({
-
-                message:
-                    "Order not found in database"
-
-            });
-
-        }
-
-
-        // ==========================================
-        // CUSTOMER OWNERSHIP CHECK
-        // ==========================================
-
-        const isPrivilegedUser =
-            userRole === "admin" ||
-            userRole === "merchant" ||
-            userRole === "seller";
-
-
-        if (!isPrivilegedUser) {
-
-            if (
-                String(orderRow.buyerId) !==
-                String(userId)
-            ) {
-
+        if (role !== "admin") {
+            if (!MERCHANT_STATUSES.includes(requested)) {
                 return res.status(403).json({
-
-                    message:
-                        "You are not authorized to view this order"
-
+                    message: "Merchants can only set stops up to Shipped",
                 });
-
             }
 
-        }
-
-
-        // ==========================================
-        // GET BUYER
-        // ==========================================
-
-        let order =
-            orderRow;
-
-
-        if (orderRow.buyerId) {
-
-            const userQuery =
-                await pool.query(
-                    `
-                    SELECT
-                        name,
-                        email
-                    FROM users
-                    WHERE id = $1
-                    `,
-                    [
-                        orderRow.buyerId
-                    ]
-                );
-
-
-            if (
-                userQuery.rows.length > 0
-            ) {
-
-                order.buyer_name =
-                    userQuery.rows[0].name;
-
-                order.buyer_email =
-                    userQuery.rows[0].email;
-
+            if (MERCHANT_LOCKED.includes(String(order.status || "").toUpperCase())) {
+                return res.status(403).json({
+                    message: "This order is already shipped. Further stops are handled by the admin.",
+                });
             }
 
+            const ownsItem = (order.items || []).some(
+                (item) => item.product && item.product.createdBy === req.user.id
+            );
+            if (!ownsItem) {
+                return res.status(403).json({ message: "This order does not contain your products" });
+            }
         }
 
-
-        // ==========================================
-        // FORMAT ORDER
-        // ==========================================
-
-        const formattedOrder =
-            formatOrder(order);
-
-
-        return res.status(200).json({
-
-            success: true,
-
-            order:
-            formattedOrder
-
-        });
-
-
-    } catch (error) {
-
-        console.error(
-            "Fetch order by ID error:",
-            error.message
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Server error fetching order",
-
-            error:
-            error.message
-
-        });
-
+        order.status = requested;
+        await order.save();
+        res.json(order);
+    } catch (err) {
+        res.status(400).json({ message: "Failed to update order", error: err.message });
     }
-
-};
-
-
-// ==========================================
-// UPDATE ORDER STATUS
-// PUT /api/orders/:id/status
-// ==========================================
-
-const updateOrderStatus = async (req, res) => {
-
-    try {
-
-        console.log(
-            "===================================="
-        );
-
-        console.log(
-            "STATUS UPDATE ROUTE HIT"
-        );
-
-        console.log(
-            "Order ID:",
-            req.params.id
-        );
-
-        console.log(
-            "Request body:",
-            req.body
-        );
-
-        console.log(
-            "User:",
-            req.user
-        );
-
-        console.log(
-            "===================================="
-        );
-
-
-        const orderIdentifier =
-            req.params.id;
-
-
-        let { status } =
-            req.body;
-
-
-        // ==========================================
-        // CHECK STATUS
-        // ==========================================
-
-        if (!status) {
-
-            return res.status(400).json({
-
-                message:
-                    "Order status is required"
-
-            });
-
-        }
-
-
-        // ==========================================
-        // NORMALIZE STATUS
-        // ==========================================
-
-        status =
-            String(status)
-                .trim()
-                .toLowerCase()
-                .replace(/[\s-]+/g, "_");
-
-
-        // ==========================================
-        // ALLOWED STATUS VALUES
-        // ==========================================
-
-        const allowedStatuses = [
-
-            "pending",
-
-            "paid",
-
-            "processing",
-
-            "shipped",
-
-            "out_for_delivery",
-
-            "delivered",
-
-            "completed",
-
-            "cancelled"
-
-        ];
-
-
-        if (
-            !allowedStatuses.includes(
-                status
-            )
-        ) {
-
-            return res.status(400).json({
-
-                message:
-                    "Invalid order status",
-
-                allowedStatuses
-
-            });
-
-        }
-
-
-        // ==========================================
-        // FIND ORDER
-        // ==========================================
-
-        const targetOrder =
-            await resolveOrderRow(
-                orderIdentifier
-            );
-
-
-        if (!targetOrder) {
-
-            return res.status(404).json({
-
-                message:
-                    `Order ${orderIdentifier} not found in database`
-
-            });
-
-        }
-
-
-        // ==========================================
-        // UPDATE STATUS
-        // ==========================================
-
-        const updateResult =
-            await pool.query(
-                `
-                UPDATE orders
-
-                SET
-                    status = $1,
-                    "updatedAt" = NOW()
-
-                WHERE id = $2
-
-                RETURNING *;
-                `,
-                [
-
-                    status,
-
-                    targetOrder.id
-
-                ]
-            );
-
-
-        if (
-            !updateResult.rows ||
-            updateResult.rows.length === 0
-        ) {
-
-            return res.status(500).json({
-
-                message:
-                    "Order status was not updated"
-
-            });
-
-        }
-
-
-        // ==========================================
-        // FORMAT UPDATED ORDER
-        // ==========================================
-
-        const order =
-            formatOrder(
-                updateResult.rows[0]
-            );
-
-
-        console.log(
-            "===================================="
-        );
-
-        console.log(
-            `Order ${order.orderId} status updated to ${order.status}`
-        );
-
-        console.log(
-            "Customer ID:",
-            updateResult.rows[0].buyerId
-        );
-
-        console.log(
-            "===================================="
-        );
-
-
-        return res.status(200).json({
-
-            success: true,
-
-            message:
-                "Order status updated successfully",
-
-            order
-
-        });
-
-
-    } catch (error) {
-
-        console.error(
-            "Error updating order status:",
-            error.message
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Server error updating order status",
-
-            error:
-            error.message
-
-        });
-
-    }
-
-};
-
-
-// ==========================================
-// EXPORTS
-// ==========================================
-
-module.exports = {
-
-    createOrder,
-
-    getMyOrders,
-
-    getAllOrders,
-
-    getOrderById,
-
-    updateOrderStatus
-
 };

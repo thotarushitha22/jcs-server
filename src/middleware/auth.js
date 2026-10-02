@@ -1,31 +1,38 @@
 const jwt = require("jsonwebtoken");
 
 const protect = (req, res, next) => {
-    let token = req.headers.authorization;
-
-    if (token && token.startsWith("Bearer")) {
-        try {
-            token = token.split(" ")[1];
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || "your_secret_key");
-
-            // Attach decoded user info (must contain id/userId) to request object
-            req.user = decoded;
-            return next();
-        } catch (error) {
-            return res.status(401).json({ message: "Not authorized, token failed" });
-        }
-    }
+    const token = req.headers.authorization?.startsWith("Bearer")
+        ? req.headers.authorization.split(" ")[1]
+        : req.cookies?.token;
 
     if (!token) {
-        return res.status(401).json({ message: "Not authorized, no token provided" });
+        return res.status(401).json({ message: "Not authorized — no token provided" });
+    }
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = decoded; // { id, role }
+        next();
+    } catch (err) {
+        res.status(401).json({ message: "Not authorized — invalid or expired token" });
     }
 };
 
-const sellerOnly = (req, res, next) => {
-    if (req.user && (req.user.role === 'admin' || req.user.role === 'seller' || req.user.email === 'thotarushitha22@gmail.com')) {
-        return next();
+const adminOnly = (req, res, next) => {
+    if (req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Admins only" });
     }
-    return res.status(403).json({ message: "Access denied: Admin/Seller only" });
+    next();
 };
 
-module.exports = { protect, sellerOnly };
+// Admins and merchants/sellers. Used for order status updates;
+// the controller then limits what a merchant is allowed to set.
+const adminOrMerchant = (req, res, next) => {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "merchant", "seller"].includes(role)) {
+        return res.status(403).json({ message: "Admins or merchants only" });
+    }
+    next();
+};
+
+module.exports = { protect, adminOnly, adminOrMerchant };
