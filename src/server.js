@@ -10,7 +10,7 @@ require("./config/db");
 // ===============================
 // MODELS
 // ===============================
-require("./models/order");
+require("./models/Order");
 require("./models/User");
 require("./models/Product");
 require("./models/Category");
