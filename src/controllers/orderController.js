@@ -82,7 +82,10 @@ exports.getMyOrders = async (req, res) => {
     try {
         const orders = await Order.findAll({
             where: { buyerId: req.user.id },
-            include: [{ model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] }],
+            include: [
+                { model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] },
+                { model: User, as: "buyer", attributes: ["id", "name", "email"] },
+            ],
             order: [["createdAt", "DESC"]],
         });
         res.json(orders.map(withItemDetails));
@@ -112,7 +115,10 @@ exports.getOrder = async (req, res) => {
     try {
         const order = await Order.findOne({
             where: { id: req.params.id, buyerId: req.user.id },
-            include: [{ model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] }],
+            include: [
+                { model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] },
+                { model: User, as: "buyer", attributes: ["id", "name", "email"] },
+            ],
         });
         if (!order) return res.status(404).json({ message: "Order not found" });
         res.json(withItemDetails(order));
