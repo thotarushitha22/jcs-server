@@ -72,7 +72,7 @@ exports.getMyOrders = async (req, res) => {
     }
 };
 
-// GET /api/orders/all  (admin: every order; merchant: only orders with their products)
+// GET /api/orders/all  (admin + merchant: every order in the store)
 exports.getAllOrders = async (req, res) => {
     try {
         const orders = await Order.findAll({
@@ -82,14 +82,7 @@ exports.getAllOrders = async (req, res) => {
             ],
             order: [["createdAt", "DESC"]],
         });
-
-        const role = String(req.user?.role || "").toLowerCase();
-        if (role === "admin") return res.json(orders);
-
-        const mine = orders.filter((o) =>
-            (o.items || []).some((i) => i.product && i.product.createdBy === req.user.id)
-        );
-        res.json(mine);
+        res.json(orders);
     } catch (err) {
         res.status(500).json({ message: "Failed to fetch orders", error: err.message });
     }
@@ -109,11 +102,10 @@ exports.getOrder = async (req, res) => {
     }
 };
 
-// PUT /api/orders/:id/status  (admin, or the merchant who sells an item in the order)
+// PUT /api/orders/:id/status
 //
 // Admin    -> any of the 10 tracking stops (and cancel).
-// Merchant -> only stops 1-4 (up to SHIPPED), only on orders that contain one
-//             of their own products, and not once the order is shipped.
+// Merchant -> only stops 1-4 (up to SHIPPED), and not once the order is shipped.
 const ORDER_STATUSES = [
     "PENDING", "PAID", "PROCESSING", "SHIPPED",
     "HUB_1", "HUB_2", "HUB_3", "HUB_4",
@@ -128,13 +120,7 @@ const MERCHANT_LOCKED = [
 
 exports.updateOrderStatus = async (req, res) => {
     try {
-        const order = await Order.findByPk(req.params.id, {
-            include: [{
-                model: OrderItem,
-                as: "items",
-                include: [{ model: Product, as: "product" }],
-            }],
-        });
+        const order = await Order.findByPk(req.params.id);
         if (!order) return res.status(404).json({ message: "Order not found" });
 
         const requested = String(req.body.status || "").toUpperCase();
@@ -155,13 +141,6 @@ exports.updateOrderStatus = async (req, res) => {
                 return res.status(403).json({
                     message: "This order is already shipped. Further stops are handled by the admin.",
                 });
-            }
-
-            const ownsItem = (order.items || []).some(
-                (item) => item.product && item.product.createdBy === req.user.id
-            );
-            if (!ownsItem) {
-                return res.status(403).json({ message: "This order does not contain your products" });
             }
         }
 
