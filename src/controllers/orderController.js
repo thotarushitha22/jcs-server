@@ -2,6 +2,25 @@ const { Order, OrderItem } = require("../models/Order");
 const Product = require("../models/Product");
 const User = require("../models/User");
 
+// Adds title / price / image to every order item so the frontend can show
+// the real product name and price (instead of "Product Item" and ₹0).
+const withItemDetails = (order) => {
+    const plain = order && typeof order.toJSON === "function" ? order.toJSON() : order;
+    if (!plain) return plain;
+    plain.items = (plain.items || []).map((item) => {
+        const product = item.product || {};
+        const images = Array.isArray(product.images) ? product.images : [];
+        return {
+            ...item,
+            title: product.title || item.title || "Product",
+            name: product.title || item.title || "Product",
+            price: Number(item.priceAtPurchase ?? product.price ?? 0),
+            image: images[0] || product.image || null,
+        };
+    });
+    return plain;
+};
+
 // POST /api/orders  (logged-in buyer)
 exports.createOrder = async (req, res) => {
     try {
@@ -51,7 +70,7 @@ exports.createOrder = async (req, res) => {
             include: [{ model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] }],
         });
 
-        res.status(201).json(fullOrder);
+        res.status(201).json(withItemDetails(fullOrder));
     } catch (err) {
         console.error(err);
         res.status(400).json({ message: "Failed to create order", error: err.message });
@@ -66,13 +85,13 @@ exports.getMyOrders = async (req, res) => {
             include: [{ model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] }],
             order: [["createdAt", "DESC"]],
         });
-        res.json(orders);
+        res.json(orders.map(withItemDetails));
     } catch (err) {
         res.status(500).json({ message: "Failed to fetch orders", error: err.message });
     }
 };
 
-// GET /api/orders/all  (admin + merchant: every order in the store)
+// GET /api/orders/all  (admin only — every order in the system)
 exports.getAllOrders = async (req, res) => {
     try {
         const orders = await Order.findAll({
@@ -82,7 +101,7 @@ exports.getAllOrders = async (req, res) => {
             ],
             order: [["createdAt", "DESC"]],
         });
-        res.json(orders);
+        res.json(orders.map(withItemDetails));
     } catch (err) {
         res.status(500).json({ message: "Failed to fetch orders", error: err.message });
     }
@@ -96,7 +115,7 @@ exports.getOrder = async (req, res) => {
             include: [{ model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] }],
         });
         if (!order) return res.status(404).json({ message: "Order not found" });
-        res.json(order);
+        res.json(withItemDetails(order));
     } catch (err) {
         res.status(500).json({ message: "Failed to fetch order", error: err.message });
     }
