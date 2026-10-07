@@ -72,7 +72,7 @@ exports.getMyOrders = async (req, res) => {
     }
 };
 
-// GET /api/orders/all  (admin only — every order in the system)
+// GET /api/orders/all  (admin: every order; merchant: only orders with their products)
 exports.getAllOrders = async (req, res) => {
     try {
         const orders = await Order.findAll({
@@ -82,7 +82,14 @@ exports.getAllOrders = async (req, res) => {
             ],
             order: [["createdAt", "DESC"]],
         });
-        res.json(orders);
+
+        const role = String(req.user?.role || "").toLowerCase();
+        if (role === "admin") return res.json(orders);
+
+        const mine = orders.filter((o) =>
+            (o.items || []).some((i) => i.product && i.product.createdBy === req.user.id)
+        );
+        res.json(mine);
     } catch (err) {
         res.status(500).json({ message: "Failed to fetch orders", error: err.message });
     }
