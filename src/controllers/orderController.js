@@ -21,20 +21,43 @@ const withItemDetails = (order) => {
     return plain;
 };
 
+// The database accepts only three payment methods: upi | credit | cod.
+// The shop front end sends readable labels ("Razorpay Test", "Cash on Delivery",
+// "Credit Terms"), so they are converted here instead of being rejected.
+const normalizePaymentMethod = (value) => {
+    const method = String(value || "").toLowerCase();
+    if (method.includes("cod") || method.includes("cash")) return "cod";
+    if (method.includes("credit terms") || method === "credit") return "credit";
+    return "upi"; // upi, card, netbanking, razorpay ...
+};
+
 // POST /api/orders  (logged-in buyer)
 exports.createOrder = async (req, res) => {
     try {
         const { items, shippingName, shippingGstin, shippingAddress, shippingCity, shippingPincode, shippingPhone, paymentMethod } = req.body;
 
-        if (!items || items.length === 0) {
+        if (!Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ message: "Order must include at least one item" });
         }
 
-        const products = await Product.findAll({ where: { id: items.map((i) => i.productId) } });
+        // Each line needs the product id and the quantity.
+        // (productId is the expected name; "product" and "id" are accepted too.)
+        const lines = items.map((item) => ({
+            productId: item.productId ?? item.product ?? item.id,
+            qty: Number(item.qty ?? item.quantity ?? 1),
+        }));
+
+        if (lines.some((line) => line.productId === undefined || line.productId === null || line.productId === "")) {
+            return res.status(400).json({
+                message: "Every item must include a productId",
+            });
+        }
+
+        const products = await Product.findAll({ where: { id: lines.map((l) => l.productId) } });
         const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
 
         let subtotal = 0;
-        const orderItemsData = items.map(({ productId, qty }) => {
+        const orderItemsData = lines.map(({ productId, qty }) => {
             const product = productMap[productId];
             if (!product) throw new Error(`Product ${productId} not found`);
             subtotal += Number(product.price) * qty;
@@ -47,7 +70,7 @@ exports.createOrder = async (req, res) => {
         // UPI/Cards/Netbanking is treated as paid immediately (simulated gateway
         // confirmation happens client-side before this request is sent).
         // Credit terms and Cash on Delivery are settled later, so they stay "pending".
-        const method = paymentMethod || "upi";
+        const method = normalizePaymentMethod(paymentMethod);
         const paymentStatus = method === "upi" ? "paid" : "pending";
 
         const order = await Order.create({
