@@ -51,7 +51,25 @@ router.get("/:userId", async (req, res) => {
     }
 });
 
-// 3. Remove item from wishlist
+// 3a. Remove item by user + product  ->  DELETE /api/wishlist/:userId/:productId
+// (this is the URL the frontend calls, e.g. /api/wishlist/24/6)
+router.delete("/:userId/:productId", async (req, res) => {
+    try {
+        const { userId, productId } = req.params;
+        const deleted = await Wishlist.destroy({ where: { userId, productId } });
+
+        if (!deleted) {
+            return res.status(404).json({ success: false, error: "Wishlist item not found" });
+        }
+
+        res.status(200).json({ success: true, message: "Removed from wishlist" });
+    } catch (err) {
+        console.error("Error removing from wishlist:", err);
+        res.status(500).json({ success: false, error: "Server error" });
+    }
+});
+
+// 3b. Remove item by wishlist row id  ->  DELETE /api/wishlist/:id
 router.delete("/:id", async (req, res) => {
     try {
         const { id } = req.params;
