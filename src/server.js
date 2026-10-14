@@ -14,7 +14,7 @@ require("./models/Order");
 require("./models/User");
 require("./models/Product");
 require("./models/Category");
-require("./models/Wishlist"); // <-- 1. Wishlist Model registered
+require("./models/Wishlist");
 
 // ===============================
 // ROUTES
@@ -26,7 +26,8 @@ const adminRoutes = require("./routes/adminRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
-const wishlistRoutes = require("./routes/wishlistRoutes"); // <-- 2. Wishlist Routes imported
+const wishlistRoutes = require("./routes/wishlistRoutes");
+const chatRoutes = require("./routes/chatbot"); // <-- Updated to point to chatbot.js
 
 // ===============================
 // APP
@@ -113,7 +114,13 @@ app.use("/api/payment", paymentRoutes);
 // WISHLIST ROUTES
 // ===============================
 
-app.use("/api/wishlist", wishlistRoutes); // <-- 3. Wishlist Endpoint mounted
+app.use("/api/wishlist", wishlistRoutes);
+
+// ===============================
+// CHAT ROUTES
+// ===============================
+
+app.use("/api/chat", chatRoutes);
 
 // ===============================
 // HOME
@@ -143,6 +150,7 @@ app.get("/api", (req, res) => {
             orders: "/api/orders",
             payment: "/api/payment",
             wishlist: "/api/wishlist",
+            chat: "/api/chat",
         },
     });
 });
