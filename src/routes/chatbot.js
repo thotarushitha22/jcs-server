@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "gpt-oss-120b"; // Updated to match your current Groq playground model catalog
+const MODEL = "llama-3.3-70b-versatile"; // Fully supported standard model on Groq
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY = 12;
