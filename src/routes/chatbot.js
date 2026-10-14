@@ -2,8 +2,8 @@ const express = require("express");
 
 const router = express.Router();
 
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const MODEL = process.env.CHAT_MODEL || "gpt-4o-mini"; // Fast, low-cost, or free-tier friendly
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const MODEL = "llama-3.3-70b-versatile"; // Fast and completely free-tier friendly
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY = 12;
@@ -98,10 +98,10 @@ function buildMessages(history, message) {
 
 router.post("/", async (req, res) => {
     try {
-        const apiKey = process.env.OPENAI_API_KEY;
+        const apiKey = process.env.GROQ_API_KEY;
 
         if (!apiKey) {
-            console.error("CHAT: OPENAI_API_KEY is not set on the server.");
+            console.error("CHAT: GROQ_API_KEY is not set on the server.");
 
             return res.status(503).json({
                 success: false,
@@ -138,7 +138,7 @@ router.post("/", async (req, res) => {
         let upstream;
 
         try {
-            upstream = await fetch(OPENAI_URL, {
+            upstream = await fetch(GROQ_URL, {
                 method: "POST",
                 signal: controller.signal,
                 headers: {
