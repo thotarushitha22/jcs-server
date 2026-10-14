@@ -1,13 +1,13 @@
 const express = require("express");
+const Product = require("../models/Product"); // ← adjust path if your structure differs
 
 const router = express.Router();
 
+/* =========================================
+   CONFIG
+   ========================================= */
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-
-// ✅ FIXED: Use the exact model ID available in your Groq account.
-// Verified from your Groq Playground model list.
-const MODEL = "openai/gpt-oss-120b";
-// Alternative (faster + cheaper): "openai/gpt-oss-20b"
+const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY = 12;
@@ -17,6 +17,9 @@ const REQUEST_TIMEOUT_MS = 25000;
 const WINDOW_MS = 60000;
 const MAX_REQUESTS_PER_WINDOW = 20;
 
+/* =========================================
+   SYSTEM PROMPT
+   ========================================= */
 const SYSTEM_PROMPT = `You are the JCS Global Assistant, the chat helper on the JCS Global website.
 
 About JCS Global:
@@ -29,12 +32,17 @@ About JCS Global:
 - Support: tech.support@jcsglobal.in or +91-9090007108.
 
 How to answer:
-- Help with products, B2B buying, MOQ and bulk orders, payments, order tracking, delivery and merchant services. You can also answer general questions on other topics.
-- Never invent prices, stock, delivery dates or the status of a specific order. For those, tell the customer to check the product page or "Your orders", or contact support.
-- If you are not sure about a JCS Global policy, say so and suggest contacting support.
+- If live product data is provided below (under "Live product data from JCS Global"), use the exact price, MOQ, stock and GST from it. Do NOT invent or modify those values.
+- If the user asks about a product and no live data is provided for it, say you don't have exact price info and direct the user to the product page or support.
+- Never invent delivery dates or the status of a specific order. For those, direct to "Your orders" or support.
+- If you are unsure about a JCS Global policy, say so and suggest contacting support.
 - Reply in the same language the customer writes in.
-- Keep answers short and clear. Use plain text only: no markdown symbols such as ** or #. For lists, use a hyphen at the start of each line.`;
+- Keep answers short, clear and professional.
+- Use plain text only. No markdown symbols such as ** or #. For lists, use a hyphen at the start of each line.`;
 
+/* =========================================
+   RATE LIMITING
+   ========================================= */
 const hits = new Map();
 
 function isRateLimited(ip) {
@@ -69,6 +77,9 @@ function getClientIp(req) {
     return forwarded || req.ip || "unknown";
 }
 
+/* =========================================
+   BUILD MESSAGES
+   ========================================= */
 function buildMessages(history, message) {
     const cleaned = [];
     const list = Array.isArray(history) ? history.slice(-MAX_HISTORY) : [];
@@ -100,6 +111,60 @@ function buildMessages(history, message) {
     return cleaned;
 }
 
+/* =========================================
+   PRODUCT LOOKUP FROM NEON DB
+   ========================================= */
+async function findRelevantProducts(message) {
+    try {
+        const words = message
+            .toLowerCase()
+            .replace(/[^\w\s]/g, " ")
+            .split(/\s+/)
+            .filter((w) => w.length > 2);
+
+        if (words.length === 0) return [];
+
+        // Build a case-insensitive regex from all words
+        const regex = new RegExp(words.join("|"), "i");
+
+        const products = await Product.find({
+            $or: [
+                { name: { $regex: regex } },
+                { brand: { $regex: regex } },
+                { description: { $regex: regex } },
+            ],
+        })
+            .limit(5)
+            .select("name brand price moq stock gst description")
+            .lean();
+
+        return products;
+    } catch (err) {
+        console.error("CHAT: product lookup failed", err.message);
+        return [];
+    }
+}
+
+function buildProductContext(products) {
+    if (!products || products.length === 0) return "";
+
+    const block = products
+        .map((p, i) => {
+            const lines = [`${i + 1}. ${p.name}${p.brand ? ` (${p.brand})` : ""}`];
+            lines.push(`   Price: ${p.price != null ? `Rs. ${p.price}` : "Not listed"}`);
+            lines.push(`   MOQ: ${p.moq || "1 unit"}`);
+            lines.push(`   Stock: ${p.stock || "In Stock"}`);
+            lines.push(`   GST: ${p.gst || "18%"}`);
+            return lines.join("\n");
+        })
+        .join("\n");
+
+    return `\n\nLive product data from JCS Global (use this to answer):\n${block}`;
+}
+
+/* =========================================
+   ROUTE: POST /api/chat
+   ========================================= */
 router.post("/", async (req, res) => {
     try {
         const apiKey = process.env.GROQ_API_KEY;
@@ -131,8 +196,13 @@ router.post("/", async (req, res) => {
         }
 
         const formattedHistory = buildMessages(req.body?.history, message);
+
+        // Live product data from DB
+        const matchedProducts = await findRelevantProducts(message);
+        const productContext = buildProductContext(matchedProducts);
+
         const messages = [
-            { role: "system", content: SYSTEM_PROMPT },
+            { role: "system", content: SYSTEM_PROMPT + productContext },
             ...formattedHistory,
         ];
 
@@ -147,7 +217,7 @@ router.post("/", async (req, res) => {
                 signal: controller.signal,
                 headers: {
                     "content-type": "application/json",
-                    "authorization": `Bearer ${apiKey}`,
+                    authorization: `Bearer ${apiKey}`,
                 },
                 body: JSON.stringify({
                     model: MODEL,
@@ -161,7 +231,11 @@ router.post("/", async (req, res) => {
 
         if (!upstream.ok) {
             const details = await upstream.text().catch(() => "");
-            console.error("CHAT: AI service error", upstream.status, details.slice(0, 500));
+            console.error(
+                "CHAT: AI service error",
+                upstream.status,
+                details.slice(0, 500)
+            );
 
             return res.status(503).json({
                 success: false,
