@@ -2,23 +2,15 @@ const express = require("express");
 
 const router = express.Router();
 
-// =====================================================
-// SETTINGS
-// (the API key is read from the server environment: ANTHROPIC_API_KEY)
-// =====================================================
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const MODEL = process.env.CHAT_MODEL || "gpt-4o-mini"; // Fast, low-cost, or free-tier friendly
 
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-
-// fast and low cost - change it with the CHAT_MODEL variable if you want another model
-const MODEL = process.env.CHAT_MODEL || "claude-haiku-4-5-20251001";
-
-const MAX_MESSAGE_LENGTH = 2000; // same limit as the chat box on the website
-const MAX_HISTORY = 12; // last 12 messages are sent for context
-const MAX_REPLY_TOKENS = 600; // keeps answers short and the cost low
+const MAX_MESSAGE_LENGTH = 2000;
+const MAX_HISTORY = 12;
+const MAX_REPLY_TOKENS = 600;
 const REQUEST_TIMEOUT_MS = 25000;
 
-// one visitor can send at most 20 questions per minute
-const WINDOW_MS = 60 * 1000;
+const WINDOW_MS = 60000;
 const MAX_REQUESTS_PER_WINDOW = 20;
 
 const SYSTEM_PROMPT = `You are the JCS Global Assistant, the chat helper on the JCS Global website.
@@ -39,11 +31,6 @@ How to answer:
 - Reply in the same language the customer writes in.
 - Keep answers short and clear. Use plain text only: no markdown symbols such as ** or #. For lists, use a hyphen at the start of each line.`;
 
-// =====================================================
-// SMALL HELPERS
-// =====================================================
-
-// simple per-visitor rate limit (kept in memory)
 const hits = new Map();
 
 function isRateLimited(ip) {
@@ -56,7 +43,6 @@ function isRateLimited(ip) {
     return recent.length > MAX_REQUESTS_PER_WINDOW;
 }
 
-// forget old visitors so the list never grows forever
 setInterval(() => {
     const now = Date.now();
 
@@ -79,14 +65,8 @@ function getClientIp(req) {
     return forwarded || req.ip || "unknown";
 }
 
-// Turns what the website sends into a clean list the Claude API accepts:
-// - only "user" and "assistant" messages with text
-// - the newest question is added only if it is not already the last message
-// - the chat must start with the user
-// - two messages in a row from the same sender are joined into one (identical repeats are dropped)
 function buildMessages(history, message) {
     const cleaned = [];
-
     const list = Array.isArray(history) ? history.slice(-MAX_HISTORY) : [];
 
     for (const item of list) {
@@ -113,40 +93,15 @@ function buildMessages(history, message) {
         cleaned.push({ role: "user", content: message });
     }
 
-    while (cleaned.length > 0 && cleaned[0].role !== "user") {
-        cleaned.shift();
-    }
-
-    const merged = [];
-
-    for (const item of cleaned) {
-        const previous = merged[merged.length - 1];
-
-        if (previous && previous.role === item.role) {
-            // an identical repeat (for example a retry after an error) is ignored
-            if (previous.content !== item.content) {
-                previous.content += "\n\n" + item.content;
-            }
-        } else {
-            merged.push({ role: item.role, content: item.content });
-        }
-    }
-
-    return merged;
+    return cleaned;
 }
-
-// =====================================================
-// POST /api/chat
-// body: { message: "text", history: [{ role, content }] }
-// answer: { success: true, reply: "text" }
-// =====================================================
 
 router.post("/", async (req, res) => {
     try {
-        const apiKey = process.env.ANTHROPIC_API_KEY;
+        const apiKey = process.env.OPENAI_API_KEY;
 
         if (!apiKey) {
-            console.error("CHAT: ANTHROPIC_API_KEY is not set on the server.");
+            console.error("CHAT: OPENAI_API_KEY is not set on the server.");
 
             return res.status(503).json({
                 success: false,
@@ -171,34 +126,28 @@ router.post("/", async (req, res) => {
             });
         }
 
-        if (message.length > MAX_MESSAGE_LENGTH) {
-            return res.status(400).json({
-                success: false,
-                message: `Your message is too long (maximum ${MAX_MESSAGE_LENGTH} characters).`,
-            });
-        }
+        const formattedHistory = buildMessages(req.body?.history, message);
+        const messages = [
+            { role: "system", content: SYSTEM_PROMPT },
+            ...formattedHistory,
+        ];
 
-        const messages = buildMessages(req.body?.history, message);
-
-        // stop waiting if the AI service is too slow
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
         let upstream;
 
         try {
-            upstream = await fetch(ANTHROPIC_URL, {
+            upstream = await fetch(OPENAI_URL, {
                 method: "POST",
                 signal: controller.signal,
                 headers: {
                     "content-type": "application/json",
-                    "x-api-key": apiKey,
-                    "anthropic-version": "2023-06-01",
+                    "authorization": `Bearer ${apiKey}`,
                 },
                 body: JSON.stringify({
                     model: MODEL,
                     max_tokens: MAX_REPLY_TOKENS,
-                    system: SYSTEM_PROMPT,
                     messages,
                 }),
             });
@@ -208,26 +157,16 @@ router.post("/", async (req, res) => {
 
         if (!upstream.ok) {
             const details = await upstream.text().catch(() => "");
-
-            // visible in the Render logs (wrong key, no credit, wrong model name ...)
             console.error("CHAT: AI service error", upstream.status, details.slice(0, 500));
 
-            return res.status(upstream.status === 429 ? 429 : 503).json({
+            return res.status(503).json({
                 success: false,
-                message:
-                    upstream.status === 429
-                        ? "The assistant is busy right now. Please try again in a moment."
-                        : "The AI assistant is temporarily unavailable.",
+                message: "The AI assistant is temporarily unavailable.",
             });
         }
 
         const data = await upstream.json();
-
-        const reply = (Array.isArray(data?.content) ? data.content : [])
-            .filter((block) => block?.type === "text")
-            .map((block) => block.text)
-            .join("\n")
-            .trim();
+        const reply = data?.choices?.[0]?.message?.content?.trim() || "";
 
         if (!reply) {
             return res.status(502).json({
