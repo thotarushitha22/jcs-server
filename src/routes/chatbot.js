@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "llama-3.3-70b-versatile";
+const MODEL = "llama-3.1-8b-instant"; // Updated to universally available free-tier model on Groq
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY = 12;
