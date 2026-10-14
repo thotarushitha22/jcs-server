@@ -1,13 +1,19 @@
 const express = require("express");
-
 const router = express.Router();
 
+/* =========================================
+   DB POOL (matches src/config/db.js exports)
+   Your config/db.js exports: { sequelize, pool }
+   ========================================= */
+const { pool: db } = require("../config/db");
+
+/* =========================================
+   CONFIG
+   ========================================= */
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-// ✅ FIXED: Use the exact model ID available in your Groq account.
-// Verified from your Groq Playground model list.
-const MODEL = "openai/gpt-oss-120b";
-// Alternative (faster + cheaper): "openai/gpt-oss-20b"
+// .trim() protects against stray whitespace/newlines in env var
+const MODEL = (process.env.GROQ_MODEL || "openai/gpt-oss-120b").trim();
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY = 12;
@@ -17,6 +23,9 @@ const REQUEST_TIMEOUT_MS = 25000;
 const WINDOW_MS = 60000;
 const MAX_REQUESTS_PER_WINDOW = 20;
 
+/* =========================================
+   SYSTEM PROMPT
+   ========================================= */
 const SYSTEM_PROMPT = `You are the JCS Global Assistant, the chat helper on the JCS Global website.
 
 About JCS Global:
@@ -29,12 +38,17 @@ About JCS Global:
 - Support: tech.support@jcsglobal.in or +91-9090007108.
 
 How to answer:
-- Help with products, B2B buying, MOQ and bulk orders, payments, order tracking, delivery and merchant services. You can also answer general questions on other topics.
-- Never invent prices, stock, delivery dates or the status of a specific order. For those, tell the customer to check the product page or "Your orders", or contact support.
-- If you are not sure about a JCS Global policy, say so and suggest contacting support.
+- If live product data is provided below (under "Live product data from JCS Global"), use the EXACT price, MOQ, stock and GST from it. Do not invent or modify those values.
+- If the user asks about a product and NO live data is provided for it, say you don't have exact info and direct them to the product page or support.
+- Never invent delivery dates or the status of a specific order. For those, direct to "Your orders" or support.
+- If you are unsure about a JCS Global policy, say so and suggest contacting support.
 - Reply in the same language the customer writes in.
-- Keep answers short and clear. Use plain text only: no markdown symbols such as ** or #. For lists, use a hyphen at the start of each line.`;
+- Keep answers short, clear and professional.
+- Use plain text only. No markdown symbols such as ** or #. For lists, use a hyphen at the start of each line.`;
 
+/* =========================================
+   RATE LIMITING
+   ========================================= */
 const hits = new Map();
 
 function isRateLimited(ip) {
@@ -69,6 +83,9 @@ function getClientIp(req) {
     return forwarded || req.ip || "unknown";
 }
 
+/* =========================================
+   BUILD MESSAGES
+   ========================================= */
 function buildMessages(history, message) {
     const cleaned = [];
     const list = Array.isArray(history) ? history.slice(-MAX_HISTORY) : [];
@@ -100,13 +117,105 @@ function buildMessages(history, message) {
     return cleaned;
 }
 
+/* =========================================
+   PRODUCT LOOKUP — Neon Postgres
+   ========================================= */
+
+function extractKeywords(message) {
+    return message
+        .toLowerCase()
+        .replace(/[^\w\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 2)
+        .slice(0, 6);
+}
+
+/**
+ * Query the products table using real column names:
+ *   title, brand, model, price, mrp, stock, moq, gstPercent, description
+ */
+async function findRelevantProducts(message) {
+    const keywords = extractKeywords(message);
+    if (keywords.length === 0) return [];
+
+    try {
+        // LOWER(title) LIKE $1 OR LOWER(brand) LIKE $1 OR LOWER(model) LIKE $1 ...
+        const conditions = keywords
+            .flatMap((_, i) => [
+                `LOWER(title) LIKE $${i + 1}`,
+                `LOWER(brand) LIKE $${i + 1}`,
+                `LOWER(COALESCE(model, '')) LIKE $${i + 1}`,
+            ])
+            .join(" OR ");
+
+        const params = keywords.map((k) => `%${k}%`);
+
+        const sql = `
+            SELECT
+                id,
+                title,
+                brand,
+                model,
+                price,
+                mrp,
+                stock,
+                moq,
+                "gstPercent" AS gst,
+                description
+            FROM products
+            WHERE ${conditions}
+            ORDER BY id DESC
+            LIMIT 5;
+        `;
+
+        const result = await db.query(sql, params);
+        return result.rows || [];
+    } catch (err) {
+        console.error("CHAT: product lookup failed:", err.message);
+        return [];
+    }
+}
+
+function buildProductContext(products) {
+    if (!products || products.length === 0) return "";
+
+    const block = products
+        .map((p, i) => {
+            const lines = [];
+
+            lines.push(
+                `${i + 1}. ${p.title}${p.brand ? ` — Brand: ${p.brand}` : ""}${
+                    p.model ? ` — Model: ${p.model}` : ""
+                }`
+            );
+
+            if (p.price != null) lines.push(`   Price: Rs. ${p.price}`);
+            if (p.mrp != null && p.mrp !== p.price) lines.push(`   MRP: Rs. ${p.mrp}`);
+            lines.push(`   MOQ: ${p.moq != null ? p.moq : 1}`);
+            lines.push(`   Stock: ${p.stock != null ? p.stock : "In Stock"}`);
+            lines.push(`   GST: ${p.gst != null ? p.gst : 18}%`);
+
+            if (p.description) {
+                const short = String(p.description).replace(/\s+/g, " ").slice(0, 220);
+                lines.push(`   Description: ${short}`);
+            }
+
+            return lines.join("\n");
+        })
+        .join("\n");
+
+    return `\n\nLive product data from JCS Global (use this to answer):\n${block}`;
+}
+
+/* =========================================
+   ROUTE: POST /api/chat
+   ========================================= */
 router.post("/", async (req, res) => {
     try {
         const apiKey = process.env.GROQ_API_KEY;
 
         if (!apiKey) {
             console.error("CHAT: GROQ_API_KEY is not set on the server.");
-
             return res.status(503).json({
                 success: false,
                 message: "The AI assistant is not set up yet.",
@@ -131,8 +240,19 @@ router.post("/", async (req, res) => {
         }
 
         const formattedHistory = buildMessages(req.body?.history, message);
+
+        // 🔎 Live product lookup
+        const matchedProducts = await findRelevantProducts(message);
+        const productContext = buildProductContext(matchedProducts);
+
+        if (matchedProducts.length > 0) {
+            console.log(
+                `CHAT: matched ${matchedProducts.length} product(s) for "${message}"`
+            );
+        }
+
         const messages = [
-            { role: "system", content: SYSTEM_PROMPT },
+            { role: "system", content: SYSTEM_PROMPT + productContext },
             ...formattedHistory,
         ];
 
@@ -147,7 +267,7 @@ router.post("/", async (req, res) => {
                 signal: controller.signal,
                 headers: {
                     "content-type": "application/json",
-                    "authorization": `Bearer ${apiKey}`,
+                    authorization: `Bearer ${apiKey}`,
                 },
                 body: JSON.stringify({
                     model: MODEL,
@@ -161,7 +281,11 @@ router.post("/", async (req, res) => {
 
         if (!upstream.ok) {
             const details = await upstream.text().catch(() => "");
-            console.error("CHAT: AI service error", upstream.status, details.slice(0, 500));
+            console.error(
+                "CHAT: AI service error",
+                upstream.status,
+                details.slice(0, 500)
+            );
 
             return res.status(503).json({
                 success: false,
