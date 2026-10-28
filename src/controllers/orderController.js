@@ -194,10 +194,11 @@ const ORDER_STATUSES = [
     "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED",
 ];
 
-const MERCHANT_STATUSES = ["PENDING", "PAID", "PROCESSING", "SHIPPED"];
+// UPDATED: Added OUT_FOR_DELIVERY and DELIVERED so the delivery app can use this route
+const MERCHANT_STATUSES = ["PENDING", "PAID", "PROCESSING", "SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED"];
+
 const MERCHANT_LOCKED = [
-    "SHIPPED", "HUB_1", "HUB_2", "HUB_3", "HUB_4",
-    "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED",
+    "DELIVERED", "CANCELLED", // They cannot change it once it's fully delivered or cancelled
 ];
 
 exports.updateOrderStatus = async (req, res) => {
@@ -213,17 +214,24 @@ exports.updateOrderStatus = async (req, res) => {
         const role = String(req.user?.role || "").toLowerCase();
 
         if (role !== "admin") {
+            // Check if merchant is allowed to set this status
             if (!MERCHANT_STATUSES.includes(requested)) {
                 return res.status(403).json({
-                    message: "Merchants can only set stops up to Shipped",
+                    message: "Merchants can only set stops up to Delivered",
                 });
             }
 
+            // Check if it's locked
             if (MERCHANT_LOCKED.includes(String(order.status || "").toUpperCase())) {
                 return res.status(403).json({
-                    message: "This order is already shipped. Further stops are handled by the admin.",
+                    message: "This order is already Delivered or Cancelled.",
                 });
             }
+        }
+
+        // If the payment method is COD and it is delivered, mark paymentStatus as paid too
+        if (requested === "DELIVERED" && order.paymentMethod === "cod") {
+            order.paymentStatus = "paid";
         }
 
         order.status = requested;
