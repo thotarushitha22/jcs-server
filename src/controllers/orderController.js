@@ -1,3 +1,4 @@
+const { sequelize } = require("../config/db"); // Import Sequelize instance for transactions
 const { Order, OrderItem } = require("../models/Order");
 const Product = require("../models/Product");
 const User = require("../models/User");
@@ -22,57 +23,80 @@ const withItemDetails = (order) => {
 };
 
 // The database accepts only three payment methods: upi | credit | cod.
-// The shop front end sends readable labels ("Razorpay Test", "Cash on Delivery",
-// "Credit Terms"), so they are converted here instead of being rejected.
 const normalizePaymentMethod = (value) => {
     const method = String(value || "").toLowerCase();
     if (method.includes("cod") || method.includes("cash")) return "cod";
     if (method.includes("credit terms") || method === "credit") return "credit";
-    return "upi"; // upi, card, netbanking, razorpay ...
+    return "upi";
 };
 
-// POST /api/orders  (logged-in buyer)
+// ==========================================
+// POST /api/orders (logged-in buyer)
+// ==========================================
 exports.createOrder = async (req, res) => {
+    // Start a transaction to handle stock deduction safely
+    const transaction = await sequelize.transaction();
+
     try {
         const { items, shippingName, shippingGstin, shippingAddress, shippingCity, shippingPincode, shippingPhone, paymentMethod } = req.body;
 
         if (!Array.isArray(items) || items.length === 0) {
+            await transaction.rollback();
             return res.status(400).json({ message: "Order must include at least one item" });
         }
 
-        // Each line needs the product id and the quantity.
-        // (productId is the expected name; "product" and "id" are accepted too.)
         const lines = items.map((item) => ({
             productId: item.productId ?? item.product ?? item.id,
             qty: Number(item.qty ?? item.quantity ?? 1),
         }));
 
         if (lines.some((line) => line.productId === undefined || line.productId === null || line.productId === "")) {
-            return res.status(400).json({
-                message: "Every item must include a productId",
-            });
+            await transaction.rollback();
+            return res.status(400).json({ message: "Every item must include a productId" });
         }
 
-        const products = await Product.findAll({ where: { id: lines.map((l) => l.productId) } });
+        // Fetch products WITH LOCK (prevents two people buying the last item at the same time)
+        const products = await Product.findAll({
+            where: { id: lines.map((l) => l.productId) },
+            transaction,
+            lock: true
+        });
         const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
 
         let subtotal = 0;
-        const orderItemsData = lines.map(({ productId, qty }) => {
+        const orderItemsData = [];
+
+        // Loop through items, check stock, and deduct
+        for (const { productId, qty } of lines) {
             const product = productMap[productId];
-            if (!product) throw new Error(`Product ${productId} not found`);
+            if (!product) {
+                await transaction.rollback();
+                return res.status(404).json({ message: `Product ${productId} not found` });
+            }
+
+            // CHECK STOCK
+            if (product.stock < qty) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    message: `Sorry, ${product.title} only has ${product.stock} units left in stock.`
+                });
+            }
+
+            // DEDUCT STOCK
+            product.stock = product.stock - qty;
+            await product.save({ transaction });
+
             subtotal += Number(product.price) * qty;
-            return { productId, qty, priceAtPurchase: product.price };
-        });
+            orderItemsData.push({ productId, qty, priceAtPurchase: product.price });
+        }
 
         const gstAmount = Math.round(subtotal * 0.18);
         const totalAmount = subtotal + gstAmount;
 
-        // UPI/Cards/Netbanking is treated as paid immediately (simulated gateway
-        // confirmation happens client-side before this request is sent).
-        // Credit terms and Cash on Delivery are settled later, so they stay "pending".
         const method = normalizePaymentMethod(paymentMethod);
         const paymentStatus = method === "upi" ? "paid" : "pending";
 
+        // Create the Order
         const order = await Order.create({
             buyerId: req.user.id,
             totalAmount,
@@ -85,9 +109,13 @@ exports.createOrder = async (req, res) => {
             shippingPhone,
             paymentMethod: method,
             paymentStatus,
-        });
+        }, { transaction });
 
-        await OrderItem.bulkCreate(orderItemsData.map((item) => ({ ...item, orderId: order.id })));
+        // Create Order Items
+        await OrderItem.bulkCreate(orderItemsData.map((item) => ({ ...item, orderId: order.id })), { transaction });
+
+        // Commit everything (Save to DB)
+        await transaction.commit();
 
         const fullOrder = await Order.findByPk(order.id, {
             include: [{ model: OrderItem, as: "items", include: [{ model: Product, as: "product" }] }],
@@ -95,12 +123,15 @@ exports.createOrder = async (req, res) => {
 
         res.status(201).json(withItemDetails(fullOrder));
     } catch (err) {
-        console.error(err);
+        await transaction.rollback();
+        console.error("Order Error:", err);
         res.status(400).json({ message: "Failed to create order", error: err.message });
     }
 };
 
-// GET /api/orders  (logged-in buyer's own orders)
+// ==========================================
+// GET /api/orders (logged-in buyer's own orders)
+// ==========================================
 exports.getMyOrders = async (req, res) => {
     try {
         const orders = await Order.findAll({
@@ -117,7 +148,9 @@ exports.getMyOrders = async (req, res) => {
     }
 };
 
-// GET /api/orders/all  (admin only — every order in the system)
+// ==========================================
+// GET /api/orders/all (admin only — every order in the system)
+// ==========================================
 exports.getAllOrders = async (req, res) => {
     try {
         const orders = await Order.findAll({
@@ -133,7 +166,9 @@ exports.getAllOrders = async (req, res) => {
     }
 };
 
+// ==========================================
 // GET /api/orders/:id
+// ==========================================
 exports.getOrder = async (req, res) => {
     try {
         const order = await Order.findOne({
@@ -150,10 +185,9 @@ exports.getOrder = async (req, res) => {
     }
 };
 
+// ==========================================
 // PUT /api/orders/:id/status
-//
-// Admin    -> any of the 10 tracking stops (and cancel).
-// Merchant -> only stops 1-4 (up to SHIPPED), and not once the order is shipped.
+// ==========================================
 const ORDER_STATUSES = [
     "PENDING", "PAID", "PROCESSING", "SHIPPED",
     "HUB_1", "HUB_2", "HUB_3", "HUB_4",
