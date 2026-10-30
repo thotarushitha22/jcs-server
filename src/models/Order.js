@@ -7,24 +7,9 @@ const Order = sequelize.define("Order", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     totalAmount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
     gstAmount: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
-
-    // text instead of ENUM, so every tracking stop can be stored:
-    // PENDING, PAID, PROCESSING, SHIPPED, HUB_1..HUB_4, OUT_FOR_DELIVERY,
-    // DELIVERED, CANCELLED
-    status: {
-        type: DataTypes.STRING(30),
-        defaultValue: "PENDING",
-    },
-
-    paymentStatus: {
-        type: DataTypes.ENUM("pending", "paid"),
-        defaultValue: "pending",
-    },
-    paymentMethod: {
-        type: DataTypes.ENUM("upi", "credit", "cod"),
-        defaultValue: "upi",
-    },
-
+    status: { type: DataTypes.STRING(30), defaultValue: "PENDING" },
+    paymentStatus: { type: DataTypes.ENUM("pending", "paid"), defaultValue: "pending" },
+    paymentMethod: { type: DataTypes.ENUM("upi", "credit", "cod"), defaultValue: "upi" },
     shippingName: DataTypes.STRING,
     shippingGstin: DataTypes.STRING,
     shippingAddress: DataTypes.STRING,
@@ -32,18 +17,15 @@ const Order = sequelize.define("Order", {
     shippingPincode: DataTypes.STRING,
     shippingPhone: DataTypes.STRING,
 
-    // NEW: Save the reason why the customer cancelled
-    cancelReason: {
-        type: DataTypes.STRING,
-        allowNull: true
-    },
+    // Feedback & Cancellation columns
+    cancelReason: { type: DataTypes.STRING, allowNull: true },
+    deliveryRating: { type: DataTypes.INTEGER, allowNull: true },
+    deliveryFeedback: { type: DataTypes.TEXT, allowNull: true },
 }, {
     tableName: "orders",
     timestamps: true,
 });
 
-// Line items — one row per product in an order, with qty/price captured
-// at the time of purchase (so later price changes don't rewrite history).
 const OrderItem = sequelize.define("OrderItem", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     qty: { type: DataTypes.INTEGER, allowNull: false },

@@ -5,24 +5,13 @@ const { Pool } = require("pg");
 const connectionString = process.env.DATABASE_URL ||
     `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}/${process.env.DB_NAME}?sslmode=require`;
 
-// Initialize Sequelize instance
 const sequelize = new Sequelize(connectionString, {
     dialect: "postgres",
-    dialectOptions: {
-        ssl: {
-            rejectUnauthorized: false
-        }
-    },
+    dialectOptions: { ssl: { rejectUnauthorized: false } },
     logging: false
 });
 
-// Initialize raw pool for custom queries
-const pool = new Pool({
-    connectionString,
-    ssl: {
-        rejectUnauthorized: false
-    }
-});
+const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
 
 const initializeDatabase = async () => {
     try {
@@ -45,7 +34,6 @@ const initializeDatabase = async () => {
                 "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
-            -- Changed from "Orders" (capitalized/quoted) to lowercase orders to match queries
             CREATE TABLE IF NOT EXISTS orders (
                 id SERIAL PRIMARY KEY,
                 order_id VARCHAR(50) UNIQUE,
@@ -63,12 +51,16 @@ const initializeDatabase = async () => {
                 "totalPrice" DECIMAL(10, 2) DEFAULT 0,
                 status VARCHAR(50) NOT NULL DEFAULT 'Pending',
                 "cancelReason" VARCHAR(255),
+                "deliveryRating" INTEGER,
+                "deliveryFeedback" TEXT,
                 "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
-            -- Ensure cancelReason column exists if the table was already created before
+            -- Ensure columns exist if table was previously created
             ALTER TABLE IF EXISTS orders ADD COLUMN IF NOT EXISTS "cancelReason" VARCHAR(255);
+            ALTER TABLE IF EXISTS orders ADD COLUMN IF NOT EXISTS "deliveryRating" INTEGER;
+            ALTER TABLE IF EXISTS orders ADD COLUMN IF NOT EXISTS "deliveryFeedback" TEXT;
 
             CREATE TABLE IF NOT EXISTS order_items (
                 id SERIAL PRIMARY KEY,
@@ -86,11 +78,7 @@ const initializeDatabase = async () => {
     }
 };
 
-pool.on("connect", () => {
-    console.log("PostgreSQL connected successfully to Neon!");
-});
-
+pool.on("connect", () => console.log("PostgreSQL connected successfully to Neon!"));
 initializeDatabase();
 
-// CRITICAL: Exporting both sequelize and pool correctly
 module.exports = { sequelize, pool };
