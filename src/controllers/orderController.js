@@ -1,10 +1,9 @@
-const { sequelize } = require("../config/db"); // Import Sequelize instance for transactions
+const { sequelize } = require("../config/db");
 const { Order, OrderItem } = require("../models/Order");
 const Product = require("../models/Product");
 const User = require("../models/User");
 
-// Adds title / price / image to every order item so the frontend can show
-// the real product name and price (instead of "Product Item" and ₹0).
+// Adds title / price / image to every order item
 const withItemDetails = (order) => {
     const plain = order && typeof order.toJSON === "function" ? order.toJSON() : order;
     if (!plain) return plain;
@@ -22,7 +21,6 @@ const withItemDetails = (order) => {
     return plain;
 };
 
-// The database accepts only three payment methods: upi | credit | cod.
 const normalizePaymentMethod = (value) => {
     const method = String(value || "").toLowerCase();
     if (method.includes("cod") || method.includes("cash")) return "cod";
@@ -34,7 +32,6 @@ const normalizePaymentMethod = (value) => {
 // POST /api/orders (logged-in buyer)
 // ==========================================
 exports.createOrder = async (req, res) => {
-    // Start a transaction to handle stock deduction safely
     const transaction = await sequelize.transaction();
 
     try {
@@ -55,7 +52,6 @@ exports.createOrder = async (req, res) => {
             return res.status(400).json({ message: "Every item must include a productId" });
         }
 
-        // Fetch products WITH LOCK (prevents two people buying the last item at the same time)
         const products = await Product.findAll({
             where: { id: lines.map((l) => l.productId) },
             transaction,
@@ -66,7 +62,6 @@ exports.createOrder = async (req, res) => {
         let subtotal = 0;
         const orderItemsData = [];
 
-        // Loop through items, check stock, and deduct
         for (const { productId, qty } of lines) {
             const product = productMap[productId];
             if (!product) {
@@ -74,15 +69,11 @@ exports.createOrder = async (req, res) => {
                 return res.status(404).json({ message: `Product ${productId} not found` });
             }
 
-            // CHECK STOCK
             if (product.stock < qty) {
                 await transaction.rollback();
-                return res.status(400).json({
-                    message: `Sorry, ${product.title} only has ${product.stock} units left in stock.`
-                });
+                return res.status(400).json({ message: `Sorry, ${product.title} only has ${product.stock} units left in stock.` });
             }
 
-            // DEDUCT STOCK
             product.stock = product.stock - qty;
             await product.save({ transaction });
 
@@ -96,7 +87,6 @@ exports.createOrder = async (req, res) => {
         const method = normalizePaymentMethod(paymentMethod);
         const paymentStatus = method === "upi" ? "paid" : "pending";
 
-        // Create the Order
         const order = await Order.create({
             buyerId: req.user.id,
             totalAmount,
@@ -111,10 +101,8 @@ exports.createOrder = async (req, res) => {
             paymentStatus,
         }, { transaction });
 
-        // Create Order Items
         await OrderItem.bulkCreate(orderItemsData.map((item) => ({ ...item, orderId: order.id })), { transaction });
 
-        // Commit everything (Save to DB)
         await transaction.commit();
 
         const fullOrder = await Order.findByPk(order.id, {
@@ -130,7 +118,7 @@ exports.createOrder = async (req, res) => {
 };
 
 // ==========================================
-// GET /api/orders (logged-in buyer's own orders)
+// GET /api/orders
 // ==========================================
 exports.getMyOrders = async (req, res) => {
     try {
@@ -149,7 +137,7 @@ exports.getMyOrders = async (req, res) => {
 };
 
 // ==========================================
-// GET /api/orders/all (admin only — every order in the system)
+// GET /api/orders/all
 // ==========================================
 exports.getAllOrders = async (req, res) => {
     try {
@@ -194,12 +182,8 @@ const ORDER_STATUSES = [
     "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED",
 ];
 
-// UPDATED: Added OUT_FOR_DELIVERY and DELIVERED so the delivery app can use this route
 const MERCHANT_STATUSES = ["PENDING", "PAID", "PROCESSING", "SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED"];
-
-const MERCHANT_LOCKED = [
-    "DELIVERED", "CANCELLED", // They cannot change it once it's fully delivered or cancelled
-];
+const MERCHANT_LOCKED = ["DELIVERED", "CANCELLED"];
 
 exports.updateOrderStatus = async (req, res) => {
     try {
@@ -214,22 +198,14 @@ exports.updateOrderStatus = async (req, res) => {
         const role = String(req.user?.role || "").toLowerCase();
 
         if (role !== "admin") {
-            // Check if merchant is allowed to set this status
             if (!MERCHANT_STATUSES.includes(requested)) {
-                return res.status(403).json({
-                    message: "Merchants can only set stops up to Delivered",
-                });
+                return res.status(403).json({ message: "Merchants can only set stops up to Delivered" });
             }
-
-            // Check if it's locked
             if (MERCHANT_LOCKED.includes(String(order.status || "").toUpperCase())) {
-                return res.status(403).json({
-                    message: "This order is already Delivered or Cancelled.",
-                });
+                return res.status(403).json({ message: "This order is already Delivered or Cancelled." });
             }
         }
 
-        // If the payment method is COD and it is delivered, mark paymentStatus as paid too
         if (requested === "DELIVERED" && order.paymentMethod === "cod") {
             order.paymentStatus = "paid";
         }
@@ -239,5 +215,45 @@ exports.updateOrderStatus = async (req, res) => {
         res.json(order);
     } catch (err) {
         res.status(400).json({ message: "Failed to update order", error: err.message });
+    }
+};
+
+// ==========================================
+// NEW: PUT /api/orders/:id/cancel
+// Customer cancels their own order & stock is returned
+// ==========================================
+exports.cancelOrder = async (req, res) => {
+    try {
+        const order = await Order.findByPk(req.params.id);
+        if (!order) return res.status(404).json({ message: "Order not found" });
+
+        // 1. Check ownership (unless admin)
+        if (order.buyerId !== req.user.id && req.user.role !== "admin") {
+            return res.status(403).json({ message: "You can only cancel your own orders." });
+        }
+
+        // 2. Check if it's too late to cancel
+        const lockedStatuses = ["SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED"];
+        if (lockedStatuses.includes(String(order.status).toUpperCase())) {
+            return res.status(400).json({ message: "This order cannot be cancelled anymore." });
+        }
+
+        // 3. Return the stock to the inventory
+        const orderItems = await OrderItem.findAll({ where: { orderId: order.id } });
+        for (const item of orderItems) {
+            const product = await Product.findByPk(item.productId);
+            if (product) {
+                product.stock += item.qty;
+                await product.save();
+            }
+        }
+
+        // 4. Update status
+        order.status = "CANCELLED";
+        await order.save();
+
+        res.json(order);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to cancel order", error: err.message });
     }
 };
