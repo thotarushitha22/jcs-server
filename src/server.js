@@ -46,6 +46,10 @@ const allowedOrigins = [
 
     "https://jcs.thotarushitha22.workers.dev",
     "https://jcs-admin.thotarushitha22.workers.dev",
+
+    // NEW: Add these for Logistics and Delivery
+    "https://jcs-logistics.thotarushitha22.workers.dev",
+    "https://jcs-delivery.thotarushitha22.workers.dev"
 ];
 
 app.use(
