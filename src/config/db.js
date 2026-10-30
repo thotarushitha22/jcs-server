@@ -62,9 +62,13 @@ const initializeDatabase = async () => {
                 "shippingPrice" DECIMAL(10, 2) DEFAULT 0,
                 "totalPrice" DECIMAL(10, 2) DEFAULT 0,
                 status VARCHAR(50) NOT NULL DEFAULT 'Pending',
+                "cancelReason" VARCHAR(255),
                 "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            -- Ensure cancelReason column exists if the table was already created before
+            ALTER TABLE IF EXISTS orders ADD COLUMN IF NOT EXISTS "cancelReason" VARCHAR(255);
 
             CREATE TABLE IF NOT EXISTS order_items (
                 id SERIAL PRIMARY KEY,

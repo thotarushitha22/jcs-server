@@ -7,6 +7,7 @@ const Order = sequelize.define("Order", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     totalAmount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
     gstAmount: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+
     // text instead of ENUM, so every tracking stop can be stored:
     // PENDING, PAID, PROCESSING, SHIPPED, HUB_1..HUB_4, OUT_FOR_DELIVERY,
     // DELIVERED, CANCELLED
@@ -14,6 +15,7 @@ const Order = sequelize.define("Order", {
         type: DataTypes.STRING(30),
         defaultValue: "PENDING",
     },
+
     paymentStatus: {
         type: DataTypes.ENUM("pending", "paid"),
         defaultValue: "pending",
@@ -22,12 +24,19 @@ const Order = sequelize.define("Order", {
         type: DataTypes.ENUM("upi", "credit", "cod"),
         defaultValue: "upi",
     },
+
     shippingName: DataTypes.STRING,
     shippingGstin: DataTypes.STRING,
     shippingAddress: DataTypes.STRING,
     shippingCity: DataTypes.STRING,
     shippingPincode: DataTypes.STRING,
     shippingPhone: DataTypes.STRING,
+
+    // NEW: Save the reason why the customer cancelled
+    cancelReason: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
 }, {
     tableName: "orders",
     timestamps: true,
