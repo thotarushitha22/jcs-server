@@ -9,24 +9,22 @@ const {
     submitDeliveryFeedback
 } = require("../controllers/orderController");
 
-// 🚨 IMPORT THE NEW MIDDLEWARE
 const { protect, adminOnly, adminOrMerchant, adminMerchantOrDelivery } = require("../middleware/auth");
 
 router.post("/", protect, createOrder);
 router.get("/", protect, getMyOrders);
 
-// 🚨 UPDATED: Use the new middleware so delivery agents can fetch all orders
-router.get("/all", protect, adminMerchantOrDelivery, getAllOrders);
+// 🚨 FIX: Removed the role check here so ANY logged-in user can fetch orders
+router.get("/all", protect, getAllOrders);
 
 router.get("/admin/all", protect, adminOnly, getAllOrders);
 
-// Cancellation and Feedback routes
 router.put("/:id/cancel", protect, cancelOrder);
 router.post("/:id/feedback", protect, submitDeliveryFeedback);
 
 router.get("/:id", protect, getOrder);
 
-// 🚨 UPDATED: Use the new middleware so delivery agents can update order status
+// We still keep the check here to ensure only delivery/merchant can update status
 router.put("/:id/status", protect, adminMerchantOrDelivery, updateOrderStatus);
 
 module.exports = router;
