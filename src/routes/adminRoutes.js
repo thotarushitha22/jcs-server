@@ -8,14 +8,14 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // ==========================================
-// ADMIN ROUTES (Users, Merchants, Orders)
+// ADMIN ROUTES (Users, Merchants, Delivery, Orders)
 // ==========================================
 
 // 1. GET All Users for Admin
 router.get("/users", async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT id, name, email, role FROM users ORDER BY id DESC'
+            "SELECT id, name, email, role FROM users WHERE role NOT IN ('delivery', 'admin') ORDER BY id DESC"
         );
         return res.status(200).json(result.rows || []);
     } catch (error) {
@@ -37,7 +37,20 @@ router.get("/merchants", async (req, res) => {
     }
 });
 
-// 3. GET All Orders for Admin (Fixed to use correct "buyerId" column)
+// 🚨 3. GET All Delivery Partners for Admin
+router.get("/delivery-partners", async (req, res) => {
+    try {
+        const result = await pool.query(
+            "SELECT id, name, email, role, phone, city FROM users WHERE role = 'delivery' ORDER BY id DESC"
+        );
+        return res.status(200).json(result.rows || []);
+    } catch (error) {
+        console.error("Error fetching delivery partners:", error.message);
+        return res.status(500).json({ message: "Server error fetching delivery partners" });
+    }
+});
+
+// 4. GET All Orders for Admin
 router.get("/orders", async (req, res) => {
     try {
         const userEmail = req.headers['user-email'] || req.query.email || 'thotarushitha22@gmail.com';
@@ -64,10 +77,10 @@ router.get("/orders", async (req, res) => {
     }
 });
 
-// 4. PUT Update Order Status for Admin (Robust Multi-Column Query)
+// 5. PUT Update Order Status for Admin (Robust Multi-Column Query)
 router.put("/orders/:id/status", async (req, res) => {
     try {
-        const orderId = req.params.id; // e.g. "JCS-12" or "JCS-RAZORPAY_SANDBOX-45178"
+        const orderId = req.params.id;
         const { status } = req.body;
 
         const cleanId = orderId.replace(/^JCS-/, "").trim();
@@ -104,7 +117,7 @@ router.put("/orders/:id/status", async (req, res) => {
     }
 });
 
-// 5. DELETE User for Admin (Permanent Delete)
+// 6. DELETE User for Admin (Permanent Delete)
 router.delete("/users/:id", async (req, res) => {
     try {
         const userId = req.params.id;
@@ -126,7 +139,7 @@ router.delete("/users/:id", async (req, res) => {
     }
 });
 
-// 6. DELETE Merchant for Admin (Permanent Delete)
+// 7. DELETE Merchant for Admin (Permanent Delete)
 router.delete("/merchants/:id", async (req, res) => {
     try {
         const merchantId = req.params.id;
@@ -145,6 +158,24 @@ router.delete("/merchants/:id", async (req, res) => {
     } catch (error) {
         console.error("Error deleting merchant:", error.message);
         return res.status(500).json({ message: "Server error while deleting merchant" });
+    }
+});
+
+// 🚨 8. DELETE Delivery Partner for Admin
+router.delete("/delivery-partners/:id", async (req, res) => {
+    try {
+        const deliveryId = req.params.id;
+
+        const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING *', [deliveryId]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "Delivery partner not found" });
+        }
+
+        return res.status(200).json({ success: true, message: "Delivery partner removed", deletedId: deliveryId });
+    } catch (error) {
+        console.error("Error deleting delivery partner:", error.message);
+        return res.status(500).json({ message: "Server error while deleting delivery partner" });
     }
 });
 
