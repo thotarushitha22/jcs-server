@@ -18,7 +18,7 @@ const publicUser = (user) => ({
 // POST /api/auth/register
 exports.register = async (req, res) => {
     try {
-        const { name, email, password, phone, role, gstNumber, city } = req.body; // Added city
+        const { name, email, password, phone, role, gstNumber } = req.body;
 
         if (!name || !email || !password) {
             return res.status(400).json({ message: "Name, email, and password are required" });
@@ -31,19 +31,19 @@ exports.register = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // 🚨 FIXED: Accept 'delivery' role as well
+        // 🚨 FIXED: Allow 'delivery' role to be saved
         let assignedRole = "buyer";
         if (role === "seller") assignedRole = "seller";
         if (role === "delivery") assignedRole = "delivery";
+        if (role === "admin") assignedRole = "admin";
 
         const user = await User.create({
             name,
             email,
             password: hashedPassword,
             phone,
-            role: assignedRole, // Use the fixed role
+            role: assignedRole,
             gstNumber,
-            city: city // Save the city if your database supports it
         });
 
         const token = genToken(user);
@@ -73,7 +73,6 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: "Invalid email or password" });
         }
 
-        // Generate token with the correct role from DB
         const token = genToken(user);
         res.json({ token, user: publicUser(user) });
     } catch (err) {
@@ -82,7 +81,7 @@ exports.login = async (req, res) => {
     }
 };
 
-// GET /api/auth/me  (requires the `protect` middleware)
+// GET /api/auth/me
 exports.getMe = async (req, res) => {
     try {
         const user = await User.findByPk(req.user.id);
@@ -137,9 +136,7 @@ exports.resetPassword = async (req, res) => {
         }
 
         const user = await User.findOne({
-            where: {
-                resetPasswordToken: token,
-            },
+            where: { resetPasswordToken: token },
         });
 
         if (!user || user.resetPasswordExpires < Date.now()) {

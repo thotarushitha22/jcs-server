@@ -23,7 +23,8 @@ const User = sequelize.define("User", {
     },
     phone: DataTypes.STRING,
     role: {
-        type: DataTypes.ENUM("buyer", "seller", "admin"),
+        // 🚨 ADDED "delivery" TO THE ENUM
+        type: DataTypes.ENUM("buyer", "seller", "admin", "delivery"),
         defaultValue: "buyer",
     },
     gstNumber: DataTypes.STRING,
