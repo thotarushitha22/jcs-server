@@ -37,11 +37,11 @@ router.get("/merchants", async (req, res) => {
     }
 });
 
-// 🚨 3. GET All Delivery Partners for Admin
+// 🚨 3. GET All Delivery Partners for Admin (FIXED: Removed 'city' to stop 500 error)
 router.get("/delivery-partners", async (req, res) => {
     try {
         const result = await pool.query(
-            "SELECT id, name, email, role, phone, city FROM users WHERE role = 'delivery' ORDER BY id DESC"
+            "SELECT id, name, email, role, phone FROM users WHERE role = 'delivery' ORDER BY id DESC"
         );
         return res.status(200).json(result.rows || []);
     } catch (error) {
