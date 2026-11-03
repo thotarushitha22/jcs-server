@@ -18,7 +18,7 @@ const publicUser = (user) => ({
 // POST /api/auth/register
 exports.register = async (req, res) => {
     try {
-        const { name, email, password, phone, role, gstNumber } = req.body;
+        const { name, email, password, phone, role, gstNumber, city } = req.body; // Added city
 
         if (!name || !email || !password) {
             return res.status(400).json({ message: "Name, email, and password are required" });
@@ -31,13 +31,19 @@ exports.register = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        // 🚨 FIXED: Accept 'delivery' role as well
+        let assignedRole = "buyer";
+        if (role === "seller") assignedRole = "seller";
+        if (role === "delivery") assignedRole = "delivery";
+
         const user = await User.create({
             name,
             email,
             password: hashedPassword,
             phone,
-            role: role === "seller" ? "seller" : "buyer",
+            role: assignedRole, // Use the fixed role
             gstNumber,
+            city: city // Save the city if your database supports it
         });
 
         const token = genToken(user);
@@ -67,6 +73,7 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: "Invalid email or password" });
         }
 
+        // Generate token with the correct role from DB
         const token = genToken(user);
         res.json({ token, user: publicUser(user) });
     } catch (err) {
@@ -106,10 +113,9 @@ exports.forgotPassword = async (req, res) => {
         const resetToken = crypto.randomBytes(32).toString("hex");
 
         user.resetPasswordToken = resetToken;
-        user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // Valid for 15 minutes
+        user.resetPasswordExpires = Date.now() + 15 * 60 * 1000;
         await user.save();
 
-        // Check your backend terminal window for this log to test token functionality directly
         console.log(`🔑 PASSWORD RESET TOKEN for ${email}: ${resetToken}`);
 
         res.status(200).json({
