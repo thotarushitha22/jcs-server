@@ -5,7 +5,7 @@ require("dotenv").config();
 // ===============================
 // DATABASE
 // ===============================
-require("./config/db");
+const { sequelize } = require("./config/db");
 
 // ===============================
 // MODELS
@@ -27,7 +27,7 @@ const categoryRoutes = require("./routes/categoryRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const wishlistRoutes = require("./routes/wishlistRoutes");
-const chatRoutes = require("./routes/chatbot"); // <-- Updated to point to chatbot.js
+const chatRoutes = require("./routes/chatbot");
 
 // ===============================
 // APP
@@ -43,11 +43,8 @@ const allowedOrigins = [
     "http://localhost:5174",
     "http://localhost:5175",
     "http://localhost:3000",
-
     "https://jcs.thotarushitha22.workers.dev",
     "https://jcs-admin.thotarushitha22.workers.dev",
-
-    // NEW: Add these for Logistics and Delivery
     "https://jcs-logistics.thotarushitha22.workers.dev",
     "https://jcs-delivery.thotarushitha22.workers.dev"
 ];
@@ -55,22 +52,10 @@ const allowedOrigins = [
 app.use(
     cors({
         origin: function (origin, callback) {
-            if (!origin) {
-                return callback(null, true);
-            }
-
-            if (allowedOrigins.includes(origin)) {
-                return callback(null, true);
-            }
-
+            if (!origin) return callback(null, true);
+            if (allowedOrigins.includes(origin)) return callback(null, true);
             console.log("Blocked CORS origin:", origin);
-
-            return callback(
-                new Error(
-                    "The CORS policy for this site does not allow access from the specified Origin."
-                ),
-                false
-            );
+            return callback(new Error("The CORS policy for this site does not allow access."), false);
         },
         credentials: true,
     })
@@ -79,67 +64,28 @@ app.use(
 // ===============================
 // BODY PARSERS
 // ===============================
-app.use(
-    express.json({
-        limit: "50mb",
-    })
-);
-
-app.use(
-    express.urlencoded({
-        limit: "50mb",
-        extended: true,
-    })
-);
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // ===============================
 // API ROUTES
 // ===============================
-
 app.use("/api/auth", authRoutes);
-
 app.use("/api/merchant", merchantRoutes);
-
 app.use("/api/products", productRoutes);
-
 app.use("/api/admin", adminRoutes);
-
 app.use("/api/categories", categoryRoutes);
-
 app.use("/api/orders", orderRoutes);
-
-// ===============================
-// RAZORPAY PAYMENT ROUTES
-// ===============================
-
 app.use("/api/payment", paymentRoutes);
-
-// ===============================
-// WISHLIST ROUTES
-// ===============================
-
 app.use("/api/wishlist", wishlistRoutes);
-
-// ===============================
-// CHAT ROUTES
-// ===============================
-
 app.use("/api/chat", chatRoutes);
 
 // ===============================
-// HOME
+// HOME & HEALTH CHECK
 // ===============================
-
 app.get("/", (req, res) => {
-    res.json({
-        success: true,
-        message: "JCS Global API is running",
-    });
+    res.json({ success: true, message: "JCS Global API is running" });
 });
-
-// ===============================
-// API HEALTH CHECK
-// ===============================
 
 app.get("/api", (req, res) => {
     res.json({
@@ -160,9 +106,8 @@ app.get("/api", (req, res) => {
 });
 
 // ===============================
-// 404 HANDLER
+// 404 & ERROR HANDLERS
 // ===============================
-
 app.use((req, res) => {
     res.status(404).json({
         success: false,
@@ -171,13 +116,8 @@ app.use((req, res) => {
     });
 });
 
-// ===============================
-// ERROR HANDLER
-// ===============================
-
 app.use((err, req, res, next) => {
     console.error("SERVER ERROR:", err);
-
     res.status(err.status || 500).json({
         success: false,
         message: err.message || "Internal server error",
@@ -185,18 +125,26 @@ app.use((err, req, res, next) => {
 });
 
 // ===============================
-// START SERVER
+// START SERVER & SYNC DATABASE
 // ===============================
-
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log("========================================");
     console.log("JCS GLOBAL SERVER");
     console.log("========================================");
     console.log(`Server running on port ${PORT}`);
     console.log(`API:     http://localhost:${PORT}/api`);
     console.log(`Payment: http://localhost:${PORT}/api/payment`);
-    console.log(
-        `Create:  http://localhost:${PORT}/api/payment/create-order`
-    );
     console.log("========================================");
+
+    try {
+        await sequelize.authenticate();
+        console.log("PostgreSQL connected successfully to Neon!");
+
+        // 🚨 FORCE UPDATE: This tells Neon to add 'delivery' to the ENUM
+        await sequelize.sync({ alter: true });
+        console.log("Database schema verified: constraints, roles, and tables resolved.");
+
+    } catch (error) {
+        console.error("Database connection failed:", error);
+    }
 });
