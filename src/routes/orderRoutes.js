@@ -14,8 +14,8 @@ const { protect, adminOnly, adminOrMerchant, adminMerchantOrDelivery } = require
 router.post("/", protect, createOrder);
 router.get("/", protect, getMyOrders);
 
-// 🚨 FIX: Removed the role check here so ANY logged-in user can fetch orders
-router.get("/all", protect, getAllOrders);
+// 🚨 SECURED: Delivery agents can now fetch all orders
+router.get("/all", protect, adminMerchantOrDelivery, getAllOrders);
 
 router.get("/admin/all", protect, adminOnly, getAllOrders);
 
@@ -24,7 +24,7 @@ router.post("/:id/feedback", protect, submitDeliveryFeedback);
 
 router.get("/:id", protect, getOrder);
 
-// We still keep the check here to ensure only delivery/merchant can update status
+// 🚨 SECURED: Delivery agents can update order status
 router.put("/:id/status", protect, adminMerchantOrDelivery, updateOrderStatus);
 
 module.exports = router;

@@ -11,7 +11,7 @@ const protect = (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = decoded; // { id, role }
+        req.user = decoded;
         next();
     } catch (err) {
         res.status(401).json({ message: "Not authorized — invalid or expired token" });
@@ -25,8 +25,6 @@ const adminOnly = (req, res, next) => {
     next();
 };
 
-// Admins and merchants/sellers. Used for order status updates;
-// the controller then limits what a merchant is allowed to set.
 const adminOrMerchant = (req, res, next) => {
     const role = String(req.user?.role || "").toLowerCase();
     if (!["admin", "merchant", "seller"].includes(role)) {
@@ -35,11 +33,11 @@ const adminOrMerchant = (req, res, next) => {
     next();
 };
 
-// 🚨 NEW MIDDLEWARE: Allows Delivery Agents (and Admins/Merchants) to access orders
+// 🚨 ALLOWS DELIVERY AGENTS
 const adminMerchantOrDelivery = (req, res, next) => {
     const role = String(req.user?.role || "").toLowerCase();
     if (!["admin", "merchant", "seller", "delivery", "agent"].includes(role)) {
-        return res.status(403).json({ message: "Admins, merchants, or delivery agents only" });
+        return res.status(403).json({ message: "Access denied." });
     }
     next();
 };

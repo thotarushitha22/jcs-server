@@ -31,7 +31,7 @@ exports.register = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // 🚨 FIXED: Allow 'delivery' role to be saved
+        // 🚨 Allow 'delivery' role
         let assignedRole = "buyer";
         if (role === "seller") assignedRole = "seller";
         if (role === "delivery") assignedRole = "delivery";
@@ -73,6 +73,7 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: "Invalid email or password" });
         }
 
+        // 🚨 Generates token with correct DB role
         const token = genToken(user);
         res.json({ token, user: publicUser(user) });
     } catch (err) {
