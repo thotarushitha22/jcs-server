@@ -148,6 +148,7 @@ const ORDER_STATUSES = [
 ];
 
 const MERCHANT_STATUSES = ["PENDING", "PAID", "PROCESSING", "SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED"];
+const DELIVERY_STATUSES = ["OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED"]; // Delivery agents only need these
 const MERCHANT_LOCKED = ["DELIVERED", "CANCELLED"];
 
 exports.updateOrderStatus = async (req, res) => {
@@ -161,7 +162,14 @@ exports.updateOrderStatus = async (req, res) => {
         }
 
         const role = String(req.user?.role || "").toLowerCase();
-        if (role !== "admin") {
+
+        // 🚨 FIXED: Allow Delivery Agents to update status
+        if (role === "delivery" || role === "agent") {
+            if (!DELIVERY_STATUSES.includes(requested)) {
+                return res.status(403).json({ message: "Delivery agents can only mark as Out for Delivery, Delivered, or Cancelled." });
+            }
+        } else if (role !== "admin") {
+            // Fallback for merchants
             if (!MERCHANT_STATUSES.includes(requested)) {
                 return res.status(403).json({ message: "Merchants can only set stops up to Delivered" });
             }
