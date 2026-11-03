@@ -35,4 +35,13 @@ const adminOrMerchant = (req, res, next) => {
     next();
 };
 
-module.exports = { protect, adminOnly, adminOrMerchant };
+// 🚨 NEW MIDDLEWARE: Allows Delivery Agents (and Admins/Merchants) to access orders
+const adminMerchantOrDelivery = (req, res, next) => {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "merchant", "seller", "delivery", "agent"].includes(role)) {
+        return res.status(403).json({ message: "Admins, merchants, or delivery agents only" });
+    }
+    next();
+};
+
+module.exports = { protect, adminOnly, adminOrMerchant, adminMerchantOrDelivery };
