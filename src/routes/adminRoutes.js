@@ -37,7 +37,7 @@ router.get("/merchants", async (req, res) => {
     }
 });
 
-// 🚨 3. GET All Delivery Partners for Admin (FIXED: Removed 'city' to stop 500 error)
+// 3. GET All Delivery Partners for Admin
 router.get("/delivery-partners", async (req, res) => {
     try {
         const result = await pool.query(
@@ -77,7 +77,7 @@ router.get("/orders", async (req, res) => {
     }
 });
 
-// 5. PUT Update Order Status for Admin (Robust Multi-Column Query)
+// 5. PUT Update Order Status for Admin
 router.put("/orders/:id/status", async (req, res) => {
     try {
         const orderId = req.params.id;
@@ -117,7 +117,7 @@ router.put("/orders/:id/status", async (req, res) => {
     }
 });
 
-// 6. DELETE User for Admin (Permanent Delete)
+// 6. DELETE User for Admin
 router.delete("/users/:id", async (req, res) => {
     try {
         const userId = req.params.id;
@@ -139,7 +139,7 @@ router.delete("/users/:id", async (req, res) => {
     }
 });
 
-// 7. DELETE Merchant for Admin (Permanent Delete)
+// 7. DELETE Merchant for Admin
 router.delete("/merchants/:id", async (req, res) => {
     try {
         const merchantId = req.params.id;
@@ -161,7 +161,7 @@ router.delete("/merchants/:id", async (req, res) => {
     }
 });
 
-// 🚨 8. DELETE Delivery Partner for Admin
+// 8. DELETE Delivery Partner for Admin
 router.delete("/delivery-partners/:id", async (req, res) => {
     try {
         const deliveryId = req.params.id;
@@ -183,16 +183,32 @@ router.delete("/delivery-partners/:id", async (req, res) => {
 // PRODUCT ROUTES
 // ==========================================
 
+// 🚨 UPDATED: Added JOIN to get Merchant Name and Email
 const getProductsHandler = async (req, res) => {
     try {
-        const result = await pool.query(
-            "SELECT * FROM products ORDER BY id DESC"
+        const result = await pool.query(`
+            SELECT p.*, 
+                   u.name as merchant_name, 
+                   u.email as merchant_email 
+            FROM products p
+            LEFT JOIN users u ON p."merchantId" = u.id OR p.merchant_id = u.id
+            ORDER BY p.id DESC
+        `);
+
+        const validRows = (result.rows || []).filter(
+            p => p.title && p.title.trim() !== '' && Number(p.price) > 0
         );
-        const validRows = (result.rows || []).filter(p => p.title && p.title.trim() !== '' && Number(p.price) > 0);
         return res.status(200).json(validRows);
     } catch (error) {
         console.error("Error fetching products:", error.message);
-        return res.status(200).json([]);
+
+        // Fallback: If JOIN fails, try fetching just products so the app doesn't crash
+        try {
+            const fallbackResult = await pool.query("SELECT * FROM products ORDER BY id DESC");
+            return res.status(200).json(fallbackResult.rows || []);
+        } catch (fallbackError) {
+            return res.status(200).json([]);
+        }
     }
 };
 
