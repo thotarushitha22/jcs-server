@@ -183,7 +183,7 @@ router.delete("/delivery-partners/:id", async (req, res) => {
 // PRODUCT ROUTES
 // ==========================================
 
-// 🚨 UPDATED: Added JOIN to get Merchant Name and Email
+// 🚨 FIXED: Added JOIN to fetch Merchant Name and Email
 const getProductsHandler = async (req, res) => {
     try {
         const result = await pool.query(`
@@ -202,7 +202,7 @@ const getProductsHandler = async (req, res) => {
     } catch (error) {
         console.error("Error fetching products:", error.message);
 
-        // Fallback: If JOIN fails, try fetching just products so the app doesn't crash
+        // Fallback: If JOIN fails (e.g., columns don't exist), try fetching just products
         try {
             const fallbackResult = await pool.query("SELECT * FROM products ORDER BY id DESC");
             return res.status(200).json(fallbackResult.rows || []);
