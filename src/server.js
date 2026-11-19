@@ -140,8 +140,8 @@ app.listen(PORT, async () => {
         await sequelize.authenticate();
         console.log("PostgreSQL connected successfully to Neon!");
 
-        // 🚨 FORCE UPDATE: This tells Neon to add 'delivery' to the ENUM
-        await sequelize.sync({ alter: true });
+        // ✅ FIXED: Removed { alter: true } to prevent Sequelize from generating broken ENUM conversion SQL
+        await sequelize.sync();
         console.log("Database schema verified: constraints, roles, and tables resolved.");
 
     } catch (error) {

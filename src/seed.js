@@ -68,7 +68,7 @@ const products = [
     },
     {
         title: "Tab S9 FE 10.9\" 128GB", brand: "Samsung", slug: "tablets",
-        price: 27999, mrp: 40000, stock: 88, moq: 5, verified: false,
+        price: 30999, mrp: 40000, stock: 88, moq: 5, verified: false,
         sku: "JCS-P6-TABS9FE", model: "SM-X510", gstPercent: 18,
         warranty: "1 year manufacturer warranty on the device, 6 months on included accessories.",
         overview: "Tab S9 FE units — supplier KYC verification in progress.",
