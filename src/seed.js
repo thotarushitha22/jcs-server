@@ -1,8 +1,7 @@
 // Run with: node src/seed.js
-// Populates categories + products so the API returns real data matching
-// what the frontend's mockProducts.js currently fakes.
 require("dotenv").config();
-const { connectDB, sequelize } = require("./config/db");
+// ✅ We only import sequelize now, not connectDB
+const { sequelize } = require("./config/db");
 const Category = require("./models/Category");
 const Product = require("./models/Product");
 
@@ -96,28 +95,36 @@ const products = [
 ];
 
 const run = async () => {
-    await connectDB();
-    await sequelize.sync({ alter: true });
+    try {
+        // ✅ FIXED: Use sequelize.authenticate() directly instead of connectDB()
+        console.log("🔄 Connecting to database...");
+        await sequelize.authenticate();
+        console.log("✅ Database connected!");
 
-    for (const cat of categories) {
-        await Category.findOrCreate({ where: { slug: cat.slug }, defaults: cat });
+        await sequelize.sync();
+
+        for (const cat of categories) {
+            await Category.findOrCreate({ where: { slug: cat.slug }, defaults: cat });
+        }
+        console.log("✅ Categories seeded.");
+
+        for (const p of products) {
+            const category = await Category.findOne({ where: { slug: p.slug } });
+            const { slug, ...productData } = p;
+
+            // ✅ Upsert: Updates existing products with new prices
+            await Product.upsert({
+                ...productData,
+                categoryId: category.id
+            });
+        }
+        console.log("✅ Products seeded and updated with new prices.");
+
+        process.exit(0);
+    } catch (err) {
+        console.error("❌ Seed failed:", err);
+        process.exit(1);
     }
-    console.log("Categories seeded.");
-
-    for (const p of products) {
-        const category = await Category.findOne({ where: { slug: p.slug } });
-        const { slug, ...productData } = p;
-        await Product.findOrCreate({
-            where: { sku: p.sku },
-            defaults: { ...productData, categoryId: category.id },
-        });
-    }
-    console.log("Products seeded.");
-
-    process.exit(0);
 };
 
-run().catch((err) => {
-    console.error("Seed failed:", err);
-    process.exit(1);
-});
+run();
